@@ -184,6 +184,12 @@ FloatType ExtractVectorNew2(
   return Mold - M;
 }
 
+template<class FloatType>
+FloatType mf_from_deltaf(const FloatType delta_f){
+  const int power = std::ceil(std::log2(delta_f));
+  return 3.0 * std::pow(2, power);
+}
+
 //Serial bitwise deterministic summation.
 //Algorithm 8 from Demmel and Nguyen (2013).
 template<class FloatType>
@@ -205,13 +211,13 @@ FloatType serial_bitwise_deterministic_summation(
   }
 
   FloatType delta_f = n * m / (1 - 4 * (n + 1) * eps);
-  FloatType Mf = 3 * std::pow(2,std::ceil(std::log2(delta_f)));
+  FloatType Mf = mf_from_deltaf(delta_f);
 
   std::vector<FloatType> Tf(k);
   for(int f=0;f<k-1;f++){
     Tf[f] = ExtractVectorNew2<FloatType>(Mf, vec.begin(), vec.end());
     delta_f = n * (4 * eps * Mf / 3) / (1 - 4 * (n + 1) * eps);
-    Mf = 3 * std::pow(2,std::ceil(std::log2(delta_f)));
+    Mf = mf_from_deltaf(delta_f);
   }
 
   FloatType M = Mf;
@@ -255,7 +261,7 @@ FloatType parallel_bitwise_deterministic_summation(
     std::transform(omp_out.begin(), omp_out.end(), omp_in.begin(), omp_out.begin(), std::plus<FloatType>())) \
     initializer(omp_priv = decltype(omp_orig)(omp_orig.size()))
 
-  #pragma omp parallel default(none) reduction(vec_plus:Tf) shared(k,m,n,vec)
+  #pragma omp parallel default(none) reduction(vec_plus:Tf) shared(k,m,n,vec,std::cout)
   {
     const auto adr = SetRoundingMode(FE_UPWARD);
     const auto threads = omp_get_num_threads();
@@ -265,12 +271,12 @@ FloatType parallel_bitwise_deterministic_summation(
     const auto nhigh = (tid<threads-1) ? ((tid+1) * values_per_thread) : n;
 
     FloatType delta_f = n * m / (1 - 4 * (n + 1) * eps);
-    FloatType Mf = 3 * std::pow(2,std::ceil(std::log2(delta_f)));
+    FloatType Mf = mf_from_deltaf(delta_f);
 
     for(int f=0;f<k-1;f++){
       Tf[f] = ExtractVectorNew2<FloatType>(Mf, vec.begin() + nlow, vec.begin() + nhigh);
       delta_f = n * (4 * eps * Mf / 3) / (1 - 4 * (n + 1) * eps);
-      Mf = 3 * std::pow(2,std::ceil(std::log2(delta_f)));
+      Mf = mf_from_deltaf(delta_f);
     }
 
     FloatType M = Mf;
