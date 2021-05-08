@@ -13,6 +13,7 @@
 #include <omp.h>                //OpenMP
 #include <random>
 #include <stdexcept>
+#include <string>
 #include <typeinfo>
 #include <unordered_map>
 #include <vector>
@@ -43,8 +44,8 @@ struct Timer {
 struct SetRoundingMode {
   const int old_rounding_mode;
 
-  SetRoundingMode() : old_rounding_mode(fegetround()) {
-    if(std::fesetround(FE_UPWARD)!=0){
+  SetRoundingMode(const int mode) : old_rounding_mode(fegetround()) {
+    if(std::fesetround(mode)!=0){
       throw std::runtime_error("Failed to set directed rounding mode!");
     }
   }
@@ -192,7 +193,7 @@ FloatType serial_bitwise_deterministic_summation(
 ){
   constexpr FloatType eps = std::numeric_limits<FloatType>::epsilon();
   const auto n = vec.size();
-  const auto adr = SetRoundingMode();
+  const auto adr = SetRoundingMode(FE_UPWARD);
 
   if(n==0){
     return 0;
@@ -236,7 +237,7 @@ FloatType parallel_bitwise_deterministic_summation(
 ){
   constexpr FloatType eps = std::numeric_limits<FloatType>::epsilon();
   const auto n = vec.size();
-  const auto adr = SetRoundingMode();
+  const auto adr = SetRoundingMode(FE_UPWARD);
 
   if(n==0){
     return 0;
@@ -256,7 +257,7 @@ FloatType parallel_bitwise_deterministic_summation(
 
   #pragma omp parallel default(none) reduction(vec_plus:Tf) shared(k,m,n,vec)
   {
-    const auto adr = SetRoundingMode();
+    const auto adr = SetRoundingMode(FE_UPWARD);
     const auto threads = omp_get_num_threads();
     const auto tid = omp_get_thread_num();
     const auto values_per_thread = n / threads;
