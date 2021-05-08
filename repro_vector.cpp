@@ -187,7 +187,7 @@ FloatType ExtractVectorNew2(
 template<class FloatType>
 FloatType mf_from_deltaf(const FloatType delta_f){
   const int power = std::ceil(std::log2(delta_f));
-  return 3.0 * std::pow(2, power);
+  return static_cast<FloatType>(3.0) * std::pow(2, power);
 }
 
 //Serial bitwise deterministic summation.
@@ -344,6 +344,13 @@ FloatType PerformTestsOnData(
   std::cout.precision(std::numeric_limits<FloatType>::max_digits10);
   std::cout<<std::fixed;
 
+  std::cout<<"Parallel? "<<Parallel<<std::endl;
+  if(Parallel){
+    std::cout<<"Max threads = "<<omp_get_max_threads()<<std::endl;
+  }
+  std::cout<<"Floating type                        = "<<typeid(FloatType).name()<<std::endl;
+  std::cout<<"Simple summation accumulation type   = "<<typeid(SimpleAccumType).name()<<std::endl;
+
   //Get a reference value
   std::unordered_map<FloatType, uint32_t> simple_sums;
   std::unordered_map<FloatType, uint32_t> kahan_sums;
@@ -374,12 +381,6 @@ FloatType PerformTestsOnData(
     time_simple.stop();
   }
 
-  std::cout<<"Parallel? "<<Parallel<<std::endl;
-  if(Parallel){
-    std::cout<<"Max threads = "<<omp_get_max_threads()<<std::endl;
-  }
-  std::cout<<"Floating type                        = "<<typeid(FloatType).name()<<std::endl;
-  std::cout<<"Simple summation accumulation type   = "<<typeid(SimpleAccumType).name()<<std::endl;
   std::cout<<"Average deterministic summation time = "<<(time_deterministic.total/TESTS)<<std::endl;
   std::cout<<"Average simple summation time        = "<<(time_simple.total/TESTS)<<std::endl;
   std::cout<<"Average Kahan summation time         = "<<(time_kahan.total/TESTS)<<std::endl;
@@ -433,12 +434,12 @@ void PerformTests(const int N, const int TESTS){
 
 int main(){
   const int N = 1'000'000;
-  const int TESTS = 100;
+  const int TESTS = 20;
 
-  // PerformTests<float, float>(N, TESTS);
   // PerformTests<float, double>(N, TESTS);
   PerformTests<double, double>(N, TESTS);
   PerformTests<long double, long double>(N, TESTS);
+  PerformTests<float, float>(N, TESTS);
 
   return 0;
 }
