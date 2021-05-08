@@ -350,6 +350,10 @@ FloatType PerformTestsOnData(
   }
   std::cout<<"Floating type                        = "<<typeid(FloatType).name()<<std::endl;
   std::cout<<"Simple summation accumulation type   = "<<typeid(SimpleAccumType).name()<<std::endl;
+  // std::cout<<"Input sample = "<<std::endl;
+  // for(size_t i=0;i<10;i++){
+  //   std::cout<<"\t"<<floats[i]<<std::endl;
+  // }
 
   //Get a reference value
   std::unordered_map<FloatType, uint32_t> simple_sums;
@@ -416,15 +420,13 @@ FloatType PerformTestsOnData(
 
 // Use this to make sure the tests are reproducible
 template<class FloatType, class SimpleAccumType>
-void PerformTests(const int N, const int TESTS){
-  std::random_device rd;
-  // std::mt19937 gen(rd());
-  std::mt19937 gen(123456789);
-  std::uniform_real_distribution<FloatType> distr(-10000, 10000);
-  std::vector<FloatType> floats;
-  for(int i=0;i<N;i++){
-    floats.push_back(distr(gen));
-  }
+void PerformTests(
+  const int TESTS,
+  const std::vector<long double> &long_floats,
+  std::mt19937 &gen
+){
+  std::vector<FloatType> floats(long_floats.begin(), long_floats.end());
+
   const auto serial_val = PerformTestsOnData<false, FloatType, SimpleAccumType>(TESTS, floats, gen);
   const auto parallel_val = PerformTestsOnData<true, FloatType, SimpleAccumType>(TESTS, floats, gen);
 
@@ -446,10 +448,19 @@ int main(){
   const int N = 1'000'000;
   const int TESTS = 20;
 
-  // PerformTests<float, double>(N, TESTS);
-  PerformTests<double, double>(N, TESTS);
-  PerformTests<long double, long double>(N, TESTS);
-  PerformTests<float, float>(N, TESTS);
+  std::random_device rd;
+  // std::mt19937 gen(rd());   //Enable for randomness
+  std::mt19937 gen(123456789); //Enable for reproducibility
+  std::uniform_real_distribution<long double> distr(-100, 100);
+  std::vector<long double> long_floats;
+  for(int i=0;i<N;i++){
+    long_floats.push_back(distr(gen));
+  }
+
+  PerformTests<double, double>(TESTS, long_floats, gen);
+  PerformTests<long double, long double>(TESTS, long_floats, gen);
+  PerformTests<float, float>(TESTS, long_floats, gen);
+  PerformTests<float, double>(TESTS, long_floats, gen);
 
   return 0;
 }
