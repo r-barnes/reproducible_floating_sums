@@ -423,11 +423,13 @@ void PerformTests(const int N, const int TESTS){
   //Note that the `long double` type may only use 12-16 bytes (to maintain
   //alignment), but only 80 bits, resulting in bitwise indeterminism in the last
   //few bits; however, the floating-point values themselves will be equal.
-  std::cout<<"Serial and Parallel values match for "
+  std::cout<<"########################################"<<std::endl;
+  std::cout<<"### Serial and Parallel values match for "
            <<typeid(FloatType).name()
            <<"? "
            <<(serial_val==parallel_val)
-           <<"\n"<<std::endl;
+           <<std::endl;
+  std::cout<<"########################################\n"<<std::endl;
 }
 
 
