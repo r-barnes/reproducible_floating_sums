@@ -393,12 +393,20 @@ FloatType PerformTestsOnData(
   std::cout<<"Distinct Kahan values                = "<<kahan_sums.size()<<std::endl;
   std::cout<<"Distinct Simple values               = "<<simple_sums.size()<<std::endl;
 
+  int count = 0;
   for(const auto &kv: kahan_sums){
-    // std::cout<<"Kahan sum values (N="<<std::fixed<<kv.second<<") "<<kv.first<<" ("<<binrep<FloatType>(kv.first)<<")"<<std::endl;
+    std::cout<<"\tKahan sum values (N="<<std::fixed<<kv.second<<") "<<kv.first<<" ("<<binrep<FloatType>(kv.first)<<")"<<std::endl;
+    if(count++==10){
+      break;
+    }
   }
 
+  count = 0;
   for(const auto &kv: simple_sums){
-    // std::cout<<"Simple sum values (N="<<std::fixed<<kv.second<<") "<<kv.first<<" ("<<binrep<FloatType>(kv.first)<<")"<<std::endl;
+    std::cout<<"\tSimple sum values (N="<<std::fixed<<kv.second<<") "<<kv.first<<" ("<<binrep<FloatType>(kv.first)<<")"<<std::endl;
+    if(count++==10){
+      break;
+    }
   }
 
   std::cout<<std::endl;
