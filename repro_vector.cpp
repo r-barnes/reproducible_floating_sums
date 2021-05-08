@@ -20,7 +20,7 @@
 
 constexpr int ROUNDING_MODE = FE_UPWARD;
 constexpr int N = 100'000;
-constexpr int TESTS = 20;
+constexpr int TESTS = 100;
 
 // Simple timer class for tracking cumulative run time of the different
 // algorithms
@@ -192,6 +192,18 @@ FloatType mf_from_deltaf(const FloatType delta_f){
   return static_cast<FloatType>(3.0) * std::pow(2, power);
 }
 
+//Implements the error bound discussed near Equation 6 of
+//Demmel and Nguyen (2013).
+template<class FloatType>
+bool is_error_bound_appropriate(const size_t N, const int k){
+  const auto eps = std::numeric_limits<FloatType>::epsilon();
+  const auto ratio = std::pow(N, k) * std::pow(eps, k-1);
+  //If ratio << 1, then the conventional non-reproducible sum and the
+  //deterministic sum will have error bounds of the same order. We arbitrarily
+  //choose 1e-4 to represent this
+  return ratio < 1e-3;
+}
+
 //Serial bitwise deterministic summation.
 //Algorithm 8 from Demmel and Nguyen (2013).
 template<class FloatType>
@@ -205,6 +217,10 @@ FloatType serial_bitwise_deterministic_summation(
 
   if(n==0){
     return 0;
+  }
+
+  if(!is_error_bound_appropriate<FloatType>(vec.size(), k)){
+    std::cout<<"WARNING! Error bounds of deterministic sum are large relative to conventional summation!"<<std::endl;
   }
 
   FloatType m = std::abs(vec.front());
@@ -249,6 +265,10 @@ FloatType parallel_bitwise_deterministic_summation(
 
   if(n==0){
     return 0;
+  }
+
+  if(!is_error_bound_appropriate<FloatType>(vec.size(), k)){
+    std::cout<<"WARNING! Error bounds of deterministic sum are large relative to conventional summation!"<<std::endl;
   }
 
   std::vector<FloatType> Tf(k);
@@ -351,7 +371,9 @@ FloatType PerformTestsOnData(
     std::cout<<"Max threads = "<<omp_get_max_threads()<<std::endl;
   }
   std::cout<<"Floating type                        = "<<typeid(FloatType).name()<<std::endl;
+  std::cout<<"Floating type epsilon                = "<<std::numeric_limits<FloatType>::epsilon()<<std::endl;
   std::cout<<"Simple summation accumulation type   = "<<typeid(SimpleAccumType).name()<<std::endl;
+  std::cout<<"Number of tests                      = "<<TESTS<<std::endl;
   std::cout<<"Input sample = "<<std::endl;
   for(size_t i=0;i<10;i++){
     std::cout<<"\t"<<floats[i]<<std::endl;
