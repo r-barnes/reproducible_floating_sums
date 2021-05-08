@@ -38,22 +38,30 @@ struct Timer {
   }
 };
 
-
-
 //Simple class to enable directed rounding in floating-point math and to reset
 //the rounding mode afterwards, when it goes out of scope
-struct ActivateDirectedRounding {
+struct SetRoundingMode {
   const int old_rounding_mode;
 
-  ActivateDirectedRounding() : old_rounding_mode(fegetround()) {
+  SetRoundingMode() : old_rounding_mode(fegetround()) {
     if(std::fesetround(FE_UPWARD)!=0){
       throw std::runtime_error("Failed to set directed rounding mode!");
     }
   }
 
-  ~ActivateDirectedRounding(){
+  ~SetRoundingMode(){
     if(std::fesetround(old_rounding_mode)!=0){
       throw std::runtime_error("Failed to reset rounding mode to original value!");
+    }
+  }
+
+  static std::string get_rounding_mode_string() {
+    switch (fegetround()) {
+      case FE_DOWNWARD:   return "downward";
+      case FE_TONEAREST:  return "to-nearest";
+      case FE_TOWARDZERO: return "toward-zero";
+      case FE_UPWARD:     return "upward";
+      default:            return "unknown";
     }
   }
 };
@@ -160,7 +168,7 @@ FloatType ExtractVectorNew2(
   const typename std::vector<FloatType>::iterator &begin,
   const typename std::vector<FloatType>::iterator &end
 ){
-  const auto adr = ActivateDirectedRounding();
+  // Should use the directed rounding mode of the parent thread
 
   auto Mold = M;
   for(auto v=begin;v!=end;v++){
@@ -184,7 +192,7 @@ FloatType serial_bitwise_deterministic_summation(
 ){
   constexpr FloatType eps = std::numeric_limits<FloatType>::epsilon();
   const auto n = vec.size();
-  const auto adr = ActivateDirectedRounding();
+  const auto adr = SetRoundingMode();
 
   if(n==0){
     return 0;
@@ -228,7 +236,7 @@ FloatType parallel_bitwise_deterministic_summation(
 ){
   constexpr FloatType eps = std::numeric_limits<FloatType>::epsilon();
   const auto n = vec.size();
-  const auto adr = ActivateDirectedRounding();
+  const auto adr = SetRoundingMode();
 
   if(n==0){
     return 0;
@@ -248,7 +256,7 @@ FloatType parallel_bitwise_deterministic_summation(
 
   #pragma omp parallel default(none) reduction(vec_plus:Tf) shared(k,m,n,vec)
   {
-    const auto adr = ActivateDirectedRounding();
+    const auto adr = SetRoundingMode();
     const auto threads = omp_get_num_threads();
     const auto tid = omp_get_thread_num();
     const auto values_per_thread = n / threads;
