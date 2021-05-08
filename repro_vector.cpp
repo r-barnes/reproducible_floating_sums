@@ -18,7 +18,9 @@
 #include <unordered_map>
 #include <vector>
 
-
+constexpr int ROUNDING_MODE = FE_UPWARD;
+constexpr int N = 100'000;
+constexpr int TESTS = 20;
 
 // Simple timer class for tracking cumulative run time of the different
 // algorithms
@@ -199,7 +201,7 @@ FloatType serial_bitwise_deterministic_summation(
 ){
   constexpr FloatType eps = std::numeric_limits<FloatType>::epsilon();
   const auto n = vec.size();
-  const auto adr = SetRoundingMode(FE_UPWARD);
+  const auto adr = SetRoundingMode(ROUNDING_MODE);
 
   if(n==0){
     return 0;
@@ -243,7 +245,7 @@ FloatType parallel_bitwise_deterministic_summation(
 ){
   constexpr FloatType eps = std::numeric_limits<FloatType>::epsilon();
   const auto n = vec.size();
-  const auto adr = SetRoundingMode(FE_UPWARD);
+  const auto adr = SetRoundingMode(ROUNDING_MODE);
 
   if(n==0){
     return 0;
@@ -263,7 +265,7 @@ FloatType parallel_bitwise_deterministic_summation(
 
   #pragma omp parallel default(none) reduction(vec_plus:Tf) shared(k,m,n,vec,std::cout)
   {
-    const auto adr = SetRoundingMode(FE_UPWARD);
+    const auto adr = SetRoundingMode(ROUNDING_MODE);
     const auto threads = omp_get_num_threads();
     const auto tid = omp_get_thread_num();
     const auto values_per_thread = n / threads;
@@ -350,10 +352,10 @@ FloatType PerformTestsOnData(
   }
   std::cout<<"Floating type                        = "<<typeid(FloatType).name()<<std::endl;
   std::cout<<"Simple summation accumulation type   = "<<typeid(SimpleAccumType).name()<<std::endl;
-  // std::cout<<"Input sample = "<<std::endl;
-  // for(size_t i=0;i<10;i++){
-  //   std::cout<<"\t"<<floats[i]<<std::endl;
-  // }
+  std::cout<<"Input sample = "<<std::endl;
+  for(size_t i=0;i<10;i++){
+    std::cout<<"\t"<<floats[i]<<std::endl;
+  }
 
   //Get a reference value
   std::unordered_map<FloatType, uint32_t> simple_sums;
@@ -445,13 +447,10 @@ void PerformTests(
 
 
 int main(){
-  const int N = 1'000'000;
-  const int TESTS = 20;
-
   std::random_device rd;
   // std::mt19937 gen(rd());   //Enable for randomness
   std::mt19937 gen(123456789); //Enable for reproducibility
-  std::uniform_real_distribution<long double> distr(-100, 100);
+  std::uniform_real_distribution<long double> distr(-1000, 1000);
   std::vector<long double> long_floats;
   for(int i=0;i<N;i++){
     long_floats.push_back(distr(gen));
