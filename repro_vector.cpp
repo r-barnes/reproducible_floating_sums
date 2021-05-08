@@ -165,7 +165,7 @@ FloatType parallel_kahan_summation(const std::vector<FloatType> &vec){
 // Error-free vector transformation. Algorithm 4 from Demmel and Nguyen (2013)
 template<class FloatType>
 FloatType ExtractVectorNew2(
-  const double M,
+  const FloatType M,
   const typename std::vector<FloatType>::iterator &begin,
   const typename std::vector<FloatType>::iterator &end
 ){
