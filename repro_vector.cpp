@@ -248,6 +248,7 @@ FloatType parallel_bitwise_deterministic_summation(
 
   #pragma omp parallel default(none) reduction(vec_plus:Tf) shared(k,m,n,vec)
   {
+    const auto adr = ActivateDirectedRounding();
     const auto threads = omp_get_num_threads();
     const auto tid = omp_get_thread_num();
     const auto values_per_thread = n / threads;
@@ -324,6 +325,10 @@ FloatType PerformTestsOnData(
   Timer time_kahan;
   Timer time_simple;
 
+  //Very precise output
+  std::cout.precision(std::numeric_limits<FloatType>::max_digits10);
+  std::cout<<std::fixed;
+
   //Get a reference value
   std::unordered_map<FloatType, uint32_t> simple_sums;
   std::unordered_map<FloatType, uint32_t> kahan_sums;
@@ -365,8 +370,6 @@ FloatType PerformTestsOnData(
   std::cout<<"Average Kahan summation time         = "<<(time_kahan.total/TESTS)<<std::endl;
   std::cout<<"Ratio Deterministic to Simple        = "<<(time_deterministic.total/time_simple.total)<<std::endl;
   std::cout<<"Ratio Deterministic to Kahan         = "<<(time_deterministic.total/time_kahan.total)<<std::endl;
-
-  std::cout.precision(std::numeric_limits<FloatType>::max_digits10);
 
   std::cout<<"Reference value                      = "<<std::fixed<<ref_val<<std::endl;
   std::cout<<"Reference bits                       = "<<binrep<FloatType>(ref_val)<<std::endl;
@@ -417,10 +420,10 @@ int main(){
   const int N = 1'000'000;
   const int TESTS = 100;
 
-  PerformTests<float, float>(N, TESTS);
+  // PerformTests<float, float>(N, TESTS);
   // PerformTests<float, double>(N, TESTS);
-  // PerformTests<double, double>(N, TESTS);
-  // PerformTests<long double, long double>(N, TESTS);
+  PerformTests<double, double>(N, TESTS);
+  PerformTests<long double, long double>(N, TESTS);
 
   return 0;
 }
