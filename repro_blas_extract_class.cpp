@@ -1,4 +1,7 @@
+#include <algorithm>
 #include <array>
+#include <bitset>
+#include <climits>
 #include <cmath>
 #include <chrono>
 #include <cstdint>
@@ -6,16 +9,36 @@
 #include <iostream>
 #include <limits>
 #include <math.h>
+#include <random>
+#include <unordered_map>
 #include <vector>
 
 
-template<class ftype, int FOLD>
-struct BinnedFloat {
-  static constexpr size_t binned_size() {
-    return 2 * FOLD * sizeof(ftype);
-  }
+// Used to make showing bitwise representations somewhat more intuitive
+template<class T>
+struct binrep {
+  const T val;
+  binrep(const T val0) : val(val0) {}
+};
 
-  std::array<ftype, binned_size()> data;
+// Display the bitwise representation
+template<class T>
+std::ostream& operator<<(std::ostream& out, const binrep<T> a){
+  const char* beg = reinterpret_cast<const char*>(&a.val);
+  const char *const end = beg + sizeof(a.val);
+  while(beg != end){
+    out << std::bitset<CHAR_BIT>(*beg++);
+    if(beg < end)
+      out << ' ';
+  }
+  return out;
+}
+
+
+
+template<class ftype, int FOLD>
+struct ReproducibleFloatingAccumulator {
+  std::array<ftype, 2*FOLD> data;
 
   static constexpr auto BIN_WIDTH = std::is_same<ftype, double>::value ? 40 : 13;
   static constexpr auto MIN_EXP = std::numeric_limits<ftype>::min_exponent;
@@ -29,13 +52,12 @@ struct BinnedFloat {
 
   static constexpr std::array<ftype, MAXINDEX + MAXFOLD> initializes_bins(){
     std::array<ftype, MAXINDEX + MAXFOLD> bins{0};
-    int index = 1;
 
     bins[0] = 2.0 * ldexp(0.75, MAX_EXP - 1);
-    for(index = 1; index <= MAXINDEX; index++){
-      bins[index] = ldexp(0.75, (MAX_EXP + MANT_DIG - BIN_WIDTH + 1 - index * BIN_WIDTH));
+    for(int index = 1; index <= MAXINDEX; index++){
+      bins[index] = ldexp(0.75, MAX_EXP + MANT_DIG - BIN_WIDTH + 1 - index * BIN_WIDTH);
     }
-    for(; index < MAXINDEX + MAXFOLD; index++){
+    for(int index = MAXINDEX + 1; index < MAXINDEX + MAXFOLD; index++){
       bins[index] = bins[index - 1];
     }
 
@@ -48,21 +70,10 @@ struct BinnedFloat {
     return &bins[x];
   }
 
-  static uint32_t& get_bits(float &x){
-    return *reinterpret_cast<uint32_t*>(&x);
-  }
-
-  static uint64_t& get_bits(double &x){
-    return *reinterpret_cast<uint64_t*>(&x);
-  }
-
-  static uint32_t get_bits(const float &x){
-    return *reinterpret_cast<const uint32_t*>(&x);
-  }
-
-  static uint64_t get_bits(const double &x){
-    return *reinterpret_cast<const uint64_t*>(&x);
-  }
+  static uint32_t& get_bits(float &x)       { return *reinterpret_cast<      uint32_t*>(&x);}
+  static uint64_t& get_bits(double &x)      { return *reinterpret_cast<      uint64_t*>(&x);}
+  static uint32_t  get_bits(const float &x) { return *reinterpret_cast<const uint32_t*>(&x);}
+  static uint64_t  get_bits(const double &x){ return *reinterpret_cast<const uint64_t*>(&x);}
 
   static constexpr int ISNANINF(const ftype x) {
     const auto bits = get_bits(x);
@@ -451,7 +462,7 @@ std::vector<double> inc_vector(int n){
 
   // Set x to be a sine wave
   for(int i = 0; i < n; i++){
-    x[i] = i;
+    x[i] = i*0.0000001;
   }
 
   return x;
@@ -468,6 +479,17 @@ FloatType serial_kahan_summation(const std::vector<FloatType> &vec){
     const auto t = sum + y;
     c = (t - sum) - y;
     sum = t;
+  }
+  return sum;
+}
+
+//Simple serial summation algorithm with an accumulation type we can specify
+//to more fully explore its behaviour
+template<class FloatType, class SimpleAccumType>
+FloatType serial_simple_summation(const std::vector<FloatType> &vec){
+  SimpleAccumType sum = 0;
+  for(const auto &x: vec){
+    sum += x;
   }
   return sum;
 }
@@ -491,6 +513,7 @@ struct Timer {
   }
 };
 
+/*
 int main(){
   // const int n = 1'000'000;
   const int n = 1'000;
@@ -502,7 +525,7 @@ int main(){
   // arranged in a vector.
   Timer bin_time;
   bin_time.start();
-  BinnedFloat<float, 3> bd;
+  ReproducibleFloatingAccumulator<float, 3> bd;
   bd.zero();
   for(int i = 0; i < n; i++){
     bd.binned_dbdadd(x[i]);
@@ -518,4 +541,118 @@ int main(){
   std::cout<<"Binned sum "<<sum<<", time = "<<bin_time.total<<std::endl;
   std::cout<<"Checked sum "<<check_sum<<", time = "<<kahan_time.total<<std::endl;
   std::cout<<"Ratio (lower is better): "<<(bin_time.total/kahan_time.total)<<std::endl;
+}*/
+
+
+
+template<class FloatType>
+FloatType bitwise_deterministic_summation(const std::vector<FloatType> &vec){
+  ReproducibleFloatingAccumulator<FloatType, 3> rfa;
+  for(const auto &x: vec){
+    rfa.binned_dbdadd(x);
+  }
+  return rfa.binned_ddbconv();
+}
+
+
+
+// Timing tests for the summation algorithms
+template<class FloatType, class SimpleAccumType>
+FloatType PerformTestsOnData(
+  const int TESTS,
+  std::vector<FloatType> floats, //Make a copy so we use the same data for each test
+  std::mt19937 gen               //Make a copy so we use the same data for each test
+){
+  Timer time_deterministic;
+  Timer time_kahan;
+  Timer time_simple;
+
+  //Very precise output
+  std::cout.precision(std::numeric_limits<FloatType>::max_digits10);
+  std::cout<<std::fixed;
+
+  std::cout<<"Floating type                        = "<<typeid(FloatType).name()<<std::endl;
+  std::cout<<"Simple summation accumulation type   = "<<typeid(SimpleAccumType).name()<<std::endl;
+
+  //Get a reference value
+  std::unordered_map<FloatType, uint32_t> simple_sums;
+  std::unordered_map<FloatType, uint32_t> kahan_sums;
+  const auto ref_val = bitwise_deterministic_summation<FloatType>(floats);
+  for(int test=0;test<TESTS;test++){
+    std::shuffle(floats.begin(), floats.end(), gen);
+
+    time_deterministic.start();
+    const auto my_val = bitwise_deterministic_summation<FloatType>(floats);
+    time_deterministic.stop();
+    if(ref_val!=my_val){
+      std::cout<<"ERROR: UNEQUAL VALUES ON TEST #"<<test<<"!"<<std::endl;
+      std::cout<<"Reference      = "<<ref_val                   <<std::endl;
+      std::cout<<"Current        = "<<my_val                    <<std::endl;
+      std::cout<<"Reference bits = "<<binrep<FloatType>(ref_val)<<std::endl;
+      std::cout<<"Current   bits = "<<binrep<FloatType>(my_val) <<std::endl;
+      throw std::runtime_error("Values were not equal!");
+    }
+
+    time_kahan.start();
+    const auto kahan_sum = serial_kahan_summation<FloatType>(floats);
+    kahan_sums[kahan_sum]++;
+    time_kahan.stop();
+
+    time_simple.start();
+    const auto simple_sum = serial_simple_summation<FloatType, SimpleAccumType>(floats);
+    simple_sums[simple_sum]++;
+    time_simple.stop();
+  }
+
+  std::cout<<"Average deterministic summation time = "<<(time_deterministic.total/TESTS)<<std::endl;
+  std::cout<<"Average simple summation time        = "<<(time_simple.total/TESTS)<<std::endl;
+  std::cout<<"Average Kahan summation time         = "<<(time_kahan.total/TESTS)<<std::endl;
+  std::cout<<"Ratio Deterministic to Simple        = "<<(time_deterministic.total/time_simple.total)<<std::endl;
+  std::cout<<"Ratio Deterministic to Kahan         = "<<(time_deterministic.total/time_kahan.total)<<std::endl;
+
+  std::cout<<"Reference value                      = "<<std::fixed<<ref_val<<std::endl;
+  std::cout<<"Reference bits                       = "<<binrep<FloatType>(ref_val)<<std::endl;
+
+  std::cout<<"Distinct Kahan values                = "<<kahan_sums.size()<<std::endl;
+  std::cout<<"Distinct Simple values               = "<<simple_sums.size()<<std::endl;
+
+  for(const auto &kv: kahan_sums){
+    std::cout<<"Kahan sum values (N="<<std::fixed<<kv.second<<") "<<kv.first<<" ("<<binrep<FloatType>(kv.first)<<")"<<std::endl;
+  }
+
+  for(const auto &kv: simple_sums){
+    // std::cout<<"Simple sum values (N="<<std::fixed<<kv.second<<") "<<kv.first<<" ("<<binrep<FloatType>(kv.first)<<")"<<std::endl;
+  }
+
+  std::cout<<std::endl;
+
+  return ref_val;
+}
+
+
+
+// Use this to make sure the tests are reproducible
+template<class FloatType, class SimpleAccumType>
+void PerformTests(const int N, const int TESTS){
+  std::random_device rd;
+  // std::mt19937 gen(rd());
+  std::mt19937 gen(123456789);
+  std::uniform_real_distribution<FloatType> distr(-100, 100);
+  std::vector<FloatType> floats;
+  for(int i=0;i<N;i++){
+    floats.push_back(distr(gen));
+  }
+  PerformTestsOnData<FloatType, SimpleAccumType>(TESTS, floats, gen);
+}
+
+
+
+int main(){
+  const int N = 1'000;
+  const int TESTS = 20;
+
+  PerformTests<float, float>(N, TESTS);
+  // PerformTests<double, double>(N, TESTS);
+
+  return 0;
 }
