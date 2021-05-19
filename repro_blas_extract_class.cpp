@@ -9,7 +9,6 @@
 #include <vector>
 
 
-
 template<class ftype, int FOLD>
 struct BinnedFloat {
   static constexpr size_t binned_size() {
@@ -19,8 +18,8 @@ struct BinnedFloat {
   std::array<ftype, binned_size()> data;
 
   static constexpr auto BIN_WIDTH = std::is_same<ftype, double>::value ? 40 : 13;
-  static constexpr auto MAX_EXP = std::numeric_limits<ftype>::max_exponent;
   static constexpr auto MIN_EXP = std::numeric_limits<ftype>::min_exponent;
+  static constexpr auto MAX_EXP = std::numeric_limits<ftype>::max_exponent;
   static constexpr auto MANT_DIG = std::numeric_limits<ftype>::digits;
   static constexpr auto MAXINDEX = ((MAX_EXP - MIN_EXP + MANT_DIG - 1) / BIN_WIDTH) - 1;
   static constexpr auto MAXFOLD = MAXINDEX + 1;
@@ -45,7 +44,7 @@ struct BinnedFloat {
 
   static constexpr std::array<ftype, MAXINDEX + MAXFOLD> bins = initializes_bins();
 
-  static constexpr const ftype* binned_dmbins(const int x) {
+  static constexpr const ftype* binned_bins(const int x) {
     return &bins[x];
   }
 
@@ -75,13 +74,13 @@ struct BinnedFloat {
     return (bits >> (MANT_DIG - 1)) & (2 * MAX_EXP - 1);
   }
 
-  static constexpr int binned_dindex(const ftype X){
-    int exp = EXP(X);
+  static constexpr int binned_dindex(const ftype x){
+    int exp = EXP(x);
     if(exp == 0){
-      if(X == 0.0){
+      if(x == 0.0){
         return MAXINDEX;
       } else {
-        frexp(X, &exp);
+        frexp(x, &exp);
         return std::min((MAX_EXP - exp)/BIN_WIDTH, MAXINDEX);
       }
     }
@@ -94,11 +93,11 @@ struct BinnedFloat {
   const ftype* pvec() const { return &data[0];    }
   const ftype* cvec() const { return &data[FOLD]; }
 
-  int binned_dmindex() const {
+  int binned_index() const {
     return ((MAX_EXP + MANT_DIG - BIN_WIDTH + 1 + EXP_BIAS) - EXP(pvec()[0]))/BIN_WIDTH;
   }
 
-  bool binned_dmindex0() const {
+  bool binned_index0() const {
     return EXP(pvec()[0]) == MAX_EXP + EXP_BIAS;
   }
 
@@ -136,19 +135,19 @@ struct BinnedFloat {
 
     X_index = binned_dindex(X);
     if(priY[0] == 0.0){
-      bins = binned_dmbins(X_index);
+      bins = binned_bins(X_index);
       for(i = 0; i < FOLD; i++){
         priY[i * incpriY] = bins[i];
         carY[i * inccarY] = 0.0;
       }
     }else{
-      shift = binned_dmindex() - X_index;
+      shift = binned_index() - X_index;
       if(shift > 0){
         for(i = FOLD - 1; i >= shift; i--){
           priY[i * incpriY] = priY[(i - shift) * incpriY];
           carY[i * inccarY] = carY[(i - shift) * inccarY];
         }
-        bins = binned_dmbins(X_index);
+        bins = binned_bins(X_index);
         for(j = 0; j < i + 1; j++){
           priY[j * incpriY] = bins[j];
           carY[j * inccarY] = 0.0;
@@ -177,7 +176,6 @@ struct BinnedFloat {
    */
   void binned_dmddeposit(const ftype X, const int incpriY){
     ftype M;
-    ftype qd;
     int i;
     ftype x = X;
     auto *const priY = pvec();
@@ -187,10 +185,10 @@ struct BinnedFloat {
       return;
     }
 
-    if(binned_dmindex0()){
+    if(binned_index0()){
       M = priY[0];
-      qd = x * COMPRESSION;
-      auto ql = get_bits(qd);
+      ftype qd = x * COMPRESSION;
+      auto& ql = get_bits(qd);
       ql |= 1;
       qd += M;
       priY[0] = qd;
@@ -211,10 +209,11 @@ struct BinnedFloat {
       ql |= 1;
       priY[i * incpriY] += qd;
     } else {
+      ftype qd = x;
+      auto& ql = get_bits(qd);
       for (i = 0; i < FOLD - 1; i++) {
         M = priY[i * incpriY];
         qd = x;
-        auto ql = get_bits(qd);
         ql |= 1;
         qd += M;
         priY[i * incpriY] = qd;
@@ -222,7 +221,6 @@ struct BinnedFloat {
         x += M;
       }
       qd = x;
-      auto ql = get_bits(qd);
       ql |= 1;
       priY[i * incpriY] += qd;
     }
@@ -255,7 +253,7 @@ struct BinnedFloat {
 
     for (int i = 0; i < FOLD; i++, priX += incpriX, carX += inccarX) {
       auto tmp_renormd = priX[0];
-      auto tmp_renorml = get_bits(tmp_renormd);
+      auto& tmp_renorml = get_bits(tmp_renormd);
 
       carX[0] += (int)((tmp_renorml >> (MANT_DIG - 3)) & 3) - 2;
 
@@ -306,8 +304,6 @@ struct BinnedFloat {
    */
   double binned_conv_double(const int incpriX, const int inccarX) const {
     int i = 0;
-    int X_index;
-    const double *bins;
 
     const auto *const priX = pvec();
     const auto *const carX = cvec();
@@ -324,8 +320,8 @@ struct BinnedFloat {
     double scale_down;
     double scale_up;
     int scaled;
-    X_index = binned_dmindex();
-    bins = binned_dmbins(X_index);
+    const auto X_index = binned_index();
+    const auto *const bins = binned_bins(X_index);
     if(X_index <= (3 * MANT_DIG)/BIN_WIDTH){
       scale_down = ldexp(0.5, 1 - (2 * MANT_DIG - BIN_WIDTH));
       scale_up = ldexp(0.5, 1 + (2 * MANT_DIG - BIN_WIDTH));
@@ -367,8 +363,6 @@ struct BinnedFloat {
     return Y;
   }
 
-
-
   /**
    * @internal
    * @brief Convert manually specified binned single precision to single precision (X -> Y)
@@ -383,15 +377,14 @@ struct BinnedFloat {
    * @author Hong Diep Nguyen
    * @author Peter Ahrens
    * @date   27 Apr 2015
-  float binned_conv_single(const int incpriX, const int inccarX) {
+  */
+  float binned_conv_single(const int incpriX, const int inccarX) const {
     int i = 0;
     double Y = 0.0;
-    int X_index;
-    const float *bins;
-    auto *priX = pvec();
-    auto *carX = cvec();
+    const auto *const priX = pvec();
+    const auto *const carX = cvec();
 
-    if (ISNANINFF(priX[0])){
+    if (ISNANINF(priX[0])){
       return priX[0];
     }
 
@@ -402,12 +395,12 @@ struct BinnedFloat {
     //Note that the following order of summation is in order of decreasing
     //exponent. The following code is specific to SBWIDTH=13, FLT_MANT_DIG=24, and
     //the number of carries equal to 1.
-    X_index = binned_smindex(priX);
-    bins = binned_smbins(X_index);
+    const auto X_index = binned_index();
+    const auto *const bins = binned_bins(X_index);
     if(X_index == 0){
-      Y += (double)carX[0] * (double)(bins[0]/6.0) * (double)binned_SMEXPANSION;
+      Y += (double)carX[0] * (double)(bins[0]/6.0) * (double)EXPANSION;
       Y += (double)carX[inccarX] * (double)(bins[1]/6.0);
-      Y += (double)(priX[0] - bins[0]) * (double)binned_SMEXPANSION;
+      Y += (double)(priX[0] - bins[0]) * (double)EXPANSION;
       i = 2;
     }else{
       Y += (double)carX[0] * (double)(bins[0]/6.0);
@@ -421,12 +414,10 @@ struct BinnedFloat {
 
     return (float)Y;
   }
-   */
-
 
   ftype binned_ddbconv() const {
     if(std::is_same<ftype, float>::value){
-      // return binned_conv_single(1, 1);
+      return binned_conv_single(1, 1);
     } else {
       return binned_conv_double(1, 1);
     }
@@ -450,6 +441,17 @@ std::vector<double> sine_vector(int n){
   // Set x to be a sine wave
   for(int i = 0; i < n; i++){
     x[i] = sin(2 * M_PI * (i / (double)n - 0.5));
+  }
+
+  return x;
+}
+
+std::vector<double> inc_vector(int n){
+  std::vector<double> x(n);
+
+  // Set x to be a sine wave
+  for(int i = 0; i < n; i++){
+    x[i] = i;
   }
 
   return x;
@@ -490,15 +492,17 @@ struct Timer {
 };
 
 int main(){
-  const int n = 1'000'000;
-  const std::vector<double> x = sine_vector(n);
+  // const int n = 1'000'000;
+  const int n = 1'000;
+  // const std::vector<double> x = sine_vector(n);
+  const std::vector<double> x = inc_vector(n);
 
   // Here, we sum x using binned primitives. This is less efficient than the
   // optimized reproBLAS_sum method, but might be useful if the data isn't
   // arranged in a vector.
   Timer bin_time;
   bin_time.start();
-  BinnedFloat<double, 3> bd;
+  BinnedFloat<float, 3> bd;
   bd.zero();
   for(int i = 0; i < n; i++){
     bd.binned_dbdadd(x[i]);
@@ -508,7 +512,7 @@ int main(){
 
   Timer kahan_time;
   kahan_time.start();
-  const auto check_sum = serial_kahan_summation<long double>(x);
+  const auto check_sum = serial_kahan_summation<float>(x);
   kahan_time.stop();
 
   std::cout<<"Binned sum "<<sum<<", time = "<<bin_time.total<<std::endl;
