@@ -6,41 +6,11 @@
 #include <cmath>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <iostream>
-#include <iterator>
 #include <limits>
-#include <math.h>
 #include <random>
 #include <unordered_map>
 #include <vector>
-
-extern "C"{
-#include <binned.h>
-#include <binnedBLAS.h>
-#include <reproBLAS.h>
-}
-
-// Used to make showing bitwise representations somewhat more intuitive
-template<class T>
-struct binrep {
-  const T val;
-  binrep(const T val0) : val(val0) {}
-};
-
-// Display the bitwise representation
-template<class T>
-std::ostream& operator<<(std::ostream& out, const binrep<T> a){
-  const char* beg = reinterpret_cast<const char*>(&a.val);
-  const char *const end = beg + sizeof(a.val);
-  while(beg != end){
-    out << std::bitset<CHAR_BIT>(*beg++);
-    if(beg < end)
-      out << ' ';
-  }
-  return out;
-}
-
 
 
 template<
@@ -52,18 +22,31 @@ class ReproducibleFloatingAccumulator {
  private:
   std::array<ftype, 2*FOLD> data = {0};
 
+  ///Floating-point precision bin width
   static constexpr auto BIN_WIDTH = std::is_same<ftype, double>::value ? 40 : 13;
   static constexpr auto MIN_EXP = std::numeric_limits<ftype>::min_exponent;
   static constexpr auto MAX_EXP = std::numeric_limits<ftype>::max_exponent;
   static constexpr auto MANT_DIG = std::numeric_limits<ftype>::digits;
+  ///Binned floating-point maximum index
   static constexpr auto MAXINDEX = ((MAX_EXP - MIN_EXP + MANT_DIG - 1) / BIN_WIDTH) - 1;
+  //The maximum floating-point fold supported by the library
   static constexpr auto MAXFOLD = MAXINDEX + 1;
+  ///Binned floating-point compression factor
+  ///This factor is used to scale down inputs before deposition into the bin of
+  ///highest index
   static constexpr auto COMPRESSION = 1.0 / (1 << (MANT_DIG - BIN_WIDTH + 1));
+  ///Binned double precision expansion factor
+  ///This factor is used to scale up inputs after deposition into the bin of
+  ///highest index
   static constexpr auto EXPANSION = 1.0 * (1 << (MANT_DIG - BIN_WIDTH + 1));
   static constexpr auto EXP_BIAS = MAX_EXP - 2;
   static constexpr auto EPSILON = std::numeric_limits<ftype>::epsilon();
+  ///Binned floating-point deposit endurance
+  ///The number of deposits that can be performed before a renorm is necessary.
+  ///Applies also to binned complex double precision.
   static constexpr auto ENDURANCE = 1 << (MANT_DIG - BIN_WIDTH - 2);
 
+  ///Generates binned floating-point reference bins
   static constexpr std::array<ftype, MAXINDEX + MAXFOLD> initializes_bins(){ //checked
     std::array<ftype, MAXINDEX + MAXFOLD> bins{0};
 
@@ -83,28 +66,47 @@ class ReproducibleFloatingAccumulator {
     return bins;
   }
 
+  ///The binned floating-point reference bins
   static constexpr auto bins = initializes_bins();
 
+  ///Return a binned floating-point reference bin
   static inline constexpr const ftype* binned_bins(const int x) {
     return &bins[x];
   }
 
+  ///Get the bit representation of a float
   static inline uint32_t& get_bits(float &x)       { return *reinterpret_cast<      uint32_t*>(&x);}
+  ///Get the bit representation of a double
   static inline uint64_t& get_bits(double &x)      { return *reinterpret_cast<      uint64_t*>(&x);}
+  ///Get the bit representation of a const float
   static inline uint32_t  get_bits(const float &x) { return *reinterpret_cast<const uint32_t*>(&x);}
+  ///Get the bit representation of a const double
   static inline uint64_t  get_bits(const double &x){ return *reinterpret_cast<const uint64_t*>(&x);}
 
-  static inline constexpr int ISNANINF(const ftype x) { //checked
+  ///Return a pointer to the primary vector
+  inline ftype*       pvec()       { return &data[0];    }
+  ///Return a pointer to the carry vector
+  inline ftype*       cvec()       { return &data[FOLD]; }
+  ///Return a const pointer to the primary vector
+  inline const ftype* pvec() const { return &data[0];    }
+  ///Return a const pointer to the carry vector
+  inline const ftype* cvec() const { return &data[FOLD]; }
+
+  static inline constexpr int ISNANINF(const ftype x) {
     const auto bits = get_bits(x);
     return (bits & ((2ull * MAX_EXP - 1) << (MANT_DIG - 1))) == ((2ull * MAX_EXP - 1) << (MANT_DIG - 1));
   }
 
-  static inline constexpr int EXP(const ftype x) { //checked
+  static inline constexpr int EXP(const ftype x) {
     const auto bits = get_bits(x);
     return (bits >> (MANT_DIG - 1)) & (2 * MAX_EXP - 1);
   }
 
-  static inline constexpr int binned_dindex(const ftype x){ //checked
+  ///Get index of float-point precision
+  ///The index of a non-binned type is the smallest index a binned type would
+  ///need to have to sum it reproducibly. Higher indicies correspond to smaller
+  ///bins.
+  static inline constexpr int binned_dindex(const ftype x){
     int exp = EXP(x);
     if(exp == 0){
       if(x == 0.0){
@@ -117,39 +119,27 @@ class ReproducibleFloatingAccumulator {
     return ((MAX_EXP + EXP_BIAS) - exp)/BIN_WIDTH;
   }
 
-  inline ftype*       pvec()       { return &data[0];    }
-  inline ftype*       cvec()       { return &data[FOLD]; }
-  inline const ftype* pvec() const { return &data[0];    }
-  inline const ftype* cvec() const { return &data[FOLD]; }
-
-  inline int binned_index() const { //checked
+  ///Get index of manually specified binned double precision
+  ///The index of a binned type is the bin that it corresponds to. Higher
+  ///indicies correspond to smaller bins.
+  inline int binned_index() const {
     return ((MAX_EXP + MANT_DIG - BIN_WIDTH + 1 + EXP_BIAS) - EXP(pvec()[0]))/BIN_WIDTH;
   }
 
-  inline bool binned_index0() const { //checked
+  ///Check if index of manually specified binned floating-point is 0
+  ///A quick check to determine if the index is 0
+  inline bool binned_index0() const {
     return EXP(pvec()[0]) == MAX_EXP + EXP_BIAS;
   }
 
-
-
-/**
- * @internal
- * @brief Update manually specified binned double precision with double precision (X -> Y)
- *
- * This method updates Y to an index suitable for adding numbers with absolute value less than X
- *
- * @param fold the fold of the binned types
- * @param X scalar X
- * @param priY Y's primary vector
- * @param incpriY stride within Y's primary vector (use every incpriY'th element)
- * @param carY Y's carry vector
- * @param inccarY stride within Y's carry vector (use every inccarY'th element)
- *
- * @author Hong Diep Nguyen
- * @author Peter Ahrens
- * @date   5 May 2015
- */
-  void binned_dmdupdate(const ftype X, const int incpriY, const int inccarY) { //checked
+  ///Update manually specified binned fp with a scalar (X -> Y)
+  ///
+  ///This method updates the binned fp to an index suitable for adding numbers
+  ///with absolute value less than @p max_abs_val
+  ///
+  ///@param incpriY stride within Y's primary vector (use every incpriY'th element)
+  ///@param inccarY stride within Y's carry vector (use every inccarY'th element)
+  void binned_dmdupdate(const ftype max_abs_val, const int incpriY, const int inccarY) {
     int i;
     int j;
     int X_index;
@@ -161,7 +151,7 @@ class ReproducibleFloatingAccumulator {
       return;
     }
 
-    X_index = binned_dindex(X);
+    X_index = binned_dindex(max_abs_val);
     if(priY[0] == 0.0){
       const ftype *const bins = binned_bins(X_index);
       for(i = 0; i < FOLD; i++){
@@ -184,25 +174,13 @@ class ReproducibleFloatingAccumulator {
     }
   }
 
-
-  /**
-   * @internal
-   * @brief  Add double precision to suitably binned manually specified binned double precision (Y += X)
-   *
-   * Performs the operation Y += X on an binned type Y where the index of Y is larger than the index of X
-   *
-   * @note This routine was provided as a means of allowing the you to optimize your code. After you have called #binned_dmdupdate() on Y with the maximum absolute value of all future elements you wish to deposit in Y, you can call #binned_dmddeposit() to deposit a maximum of #binned_DBENDURANCE elements into Y before renormalizing Y with #binned_dmrenorm(). After any number of successive calls of #binned_dmddeposit() on Y, you must renormalize Y with #binned_dmrenorm() before using any other function on Y.
-   *
-   * @param fold the fold of the binned types
-   * @param X scalar X
-   * @param priY Y's primary vector
-   * @param incpriY stride within Y's primary vector (use every incpriY'th element)
-   *
-   * @author Hong Diep Nguyen
-   * @author Peter Ahrens
-   * @date   10 Jun 2015
-   */
-  void binned_dmddeposit(const ftype X, const int incpriY){ //checked
+  ///Add scalar @p X to suitably binned manually specified binned fp (Y += X)
+  ///
+  ///Performs the operation Y += X on an binned type Y where the index of Y is
+  ///larger than the index of @p X
+  ///
+  ///@param incpriY stride within Y's primary vector (use every incpriY'th element)
+  void binned_dmddeposit(const ftype X, const int incpriY){
     ftype M;
     int i;
     ftype x = X;
@@ -255,23 +233,14 @@ class ReproducibleFloatingAccumulator {
   }
 
 
-  /**
-   * @internal
-   * @brief Renormalize manually specified binned double precision
-   *
-   * Renormalization keeps the primary vector within the necessary bins by shifting over to the carry vector
-   *
-   * @param fold the fold of the binned types
-   * @param priX X's primary vector
-   * @param incpriX stride within X's primary vector (use every incpriX'th element)
-   * @param carX X's carry vector
-   * @param inccarX stride within X's carry vector (use every inccarX'th element)
-   *
-   * @author Hong Diep Nguyen
-   * @author Peter Ahrens
-   * @date   23 Sep 2015
-   */
-  void binned_dmrenorm(const int incpriX, const int inccarX) { //checked
+  ///Renormalize manually specified binned double precision
+  ///
+  ///Renormalization keeps the primary vector within the necessary bins by
+  ///shifting over to the carry vector
+  ///
+  ///@param incpriX stride within X's primary vector (use every incpriX'th element)
+  ///@param inccarX stride within X's carry vector (use every inccarX'th element)
+  void binned_dmrenorm(const int incpriX, const int inccarX) {
     auto *priX = pvec();
     auto *carX = cvec();
 
@@ -291,43 +260,22 @@ class ReproducibleFloatingAccumulator {
     }
   }
 
-  /**
-   * @internal
-   * @brief  Add double precision to manually specified binned double precision (Y += X)
-   *
-   * Performs the operation Y += X on an binned type Y
-   *
-   * @param fold the fold of the binned types
-   * @param X scalar X
-   * @param priY Y's primary vector
-   * @param incpriY stride within Y's primary vector (use every incpriY'th element)
-   * @param carY Y's carry vector
-   * @param inccarY stride within Y's carry vector (use every inccarY'th element)
-   *
-   * @author Hong Diep Nguyen
-   * @author Peter Ahrens
-   * @date   27 Apr 2015
-   */
+  ///Add scalar to manually specified binned fp (Y += X)
+  ///
+  ///Performs the operation Y += X on an binned type Y
+  ///
+  ///@param incpriY stride within Y's primary vector (use every incpriY'th element)
+  ///@param inccarY stride within Y's carry vector (use every inccarY'th element)
   void binned_dmdadd(const ftype X, const int incpriY, const int inccarY){ //checked
     binned_dmdupdate(X, incpriY, inccarY);
     binned_dmddeposit(X, incpriY);
     binned_dmrenorm(incpriY, inccarY);
   }
 
-  /**
-   * @internal
-   * @brief Convert manually specified binned double precision to double precision (X -> Y)
-   *
-   * @param fold the fold of the binned types
-   * @param priX X's primary vector
-   * @param incpriX stride within X's primary vector (use every incpriX'th element)
-   * @param carX X's carry vector
-   * @param inccarX stride within X's carry vector (use every inccarX'th element)
-   * @return scalar Y
-   *
-   * @author Peter Ahrens
-   * @date   31 Jul 2015
-   */
+  ///Convert manually specified binned fp to native double-precision (X -> Y)
+  ///
+  ///@param incpriX stride within X's primary vector (use every incpriX'th element)
+  ///@param inccarX stride within X's carry vector (use every inccarX'th element)
   double binned_conv_double(const int incpriX, const int inccarX) const {
     int i = 0;
 
@@ -369,7 +317,7 @@ class ReproducibleFloatingAccumulator {
         Y += (priX[(FOLD - 1) * incpriX] - bins[FOLD - 1]) * scale_down;
         return Y * scale_up;
       }
-      if(isinf(Y * scale_up)){
+      if(std::isinf(Y * scale_up)){
         return Y * scale_up;
       }
       Y *= scale_up;
@@ -389,22 +337,11 @@ class ReproducibleFloatingAccumulator {
     return Y;
   }
 
-  /**
-   * @internal
-   * @brief Convert manually specified binned single precision to single precision (X -> Y)
-   *
-   * @param fold the fold of the binned types
-   * @param priX X's primary vector
-   * @param incpriX stride within X's primary vector (use every incpriX'th element)
-   * @param carX X's carry vector
-   * @param inccarX stride within X's carry vector (use every inccarX'th element)
-   * @return scalar Y
-   *
-   * @author Hong Diep Nguyen
-   * @author Peter Ahrens
-   * @date   27 Apr 2015
-  */
-  float binned_conv_single(const int incpriX, const int inccarX) const { //checked
+  ///Convert manually specified binned fp to native single-precision (X -> Y)
+  ///
+  ///@param incpriX stride within X's primary vector (use every incpriX'th element)
+  ///@param inccarX stride within X's carry vector (use every inccarX'th element)
+  float binned_conv_single(const int incpriX, const int inccarX) const {
     int i = 0;
     double Y = 0.0;
     const auto *const priX = pvec();
@@ -441,26 +378,14 @@ class ReproducibleFloatingAccumulator {
     return (float)Y;
   }
 
-  /**
-   * @internal
-   * @brief  Add manually specified binned double precision (Y += X)
-   *
-   * Performs the operation Y += X
-   *
-   * @param fold the fold of the binned types
-   * @param priX X's primary vector
-   * @param incpriX stride within X's primary vector (use every incpriX'th element)
-   * @param carX X's carry vector
-   * @param inccarX stride within X's carry vector (use every inccarX'th element)
-   * @param priY Y's primary vector
-   * @param incpriY stride within Y's primary vector (use every incpriY'th element)
-   * @param carY Y's carry vector
-   * @param inccarY stride within Y's carry vector (use every inccarY'th element)
-   *
-   * @author Hong Diep Nguyen
-   * @author Peter Ahrens
-   * @date   27 Apr 2015
-   */
+  ///Add two manually specified binned fp (Y += X)
+  ///Performs the operation Y += X
+  ///
+  ///@param other   Another binned fp of the same type
+  ///@param incpriX stride within X's primary vector (use every incpriX'th element)
+  ///@param inccarX stride within X's carry vector (use every inccarX'th element)
+  ///@param incpriY stride within Y's primary vector (use every incpriY'th element)
+  ///@param inccarY stride within Y's carry vector (use every inccarY'th element)
   void binned_dmdmadd(const ReproducibleFloatingAccumulator &other, const int incpriX, const int inccarX, const int incpriY, const int inccarY) {
     auto *const priX = pvec();
     auto *const carX = cvec();
@@ -509,51 +434,60 @@ class ReproducibleFloatingAccumulator {
     binned_dmrenorm(incpriY, inccarY);
   }
 
+  ///Add two manually specified binned fp (Y += X)
+  ///Performs the operation Y += X
   void binned_dbdbadd(const ReproducibleFloatingAccumulator &other){
     binned_dmdmadd(other, 1, 1, 1, 1);
   }
 
 
  public:
+  ///Set the binned fp to zero
   void zero() {
     data = {0};
   }
 
-  void binned_dbdadd(const ftype X){
-    binned_dmdadd(X, 1, 1);
-  }
-
+  ///Accumulate an arithmetic @p x into the binned fp.
+  ///NOTE: Casts @p x to the type of the binned fp
   template <typename U, typename std::enable_if<std::is_arithmetic<U>::value>::type* = nullptr>
   ReproducibleFloatingAccumulator& operator+=(const U x){
     binned_dmdadd(static_cast<ftype>(x), 1, 1);
     return *this;
   }
 
+  ///Accumulate-subtract an arithmetic @p x into the binned fp.
+  ///NOTE: Casts @p x to the type of the binned fp
   template <typename U, typename std::enable_if<std::is_arithmetic<U>::value>::type* = nullptr>
   ReproducibleFloatingAccumulator& operator-=(const U x){
     binned_dmdadd(-static_cast<ftype>(x), 1, 1);
     return *this;
   }
 
+  ///Accumulate a binned fp @p x into the binned fp.
   ReproducibleFloatingAccumulator& operator+=(const ReproducibleFloatingAccumulator &other){
     binned_dbdbadd(other);
     return *this;
   }
 
+  ///Accumulate-subtract a binned fp @p x into the binned fp.
+  ///NOTE: Makes a copy and performs arithmetic; slow.
   ReproducibleFloatingAccumulator& operator-=(const ReproducibleFloatingAccumulator &other){
-    throw std::runtime_error("Not implemented!");
-    // binned_dbdbadd(other);
-    // return *this;
+    const auto temp = -other;
+    binned_dbdbadd(temp);
   }
 
+  ///Determines if two binned fp are equal
   bool operator==(const ReproducibleFloatingAccumulator &other) const {
     return data==other.data;
   }
 
+  ///Determines if two binned fp are not equal
   bool operator!=(const ReproducibleFloatingAccumulator &other) const {
     return !operator==(other);
   }
 
+  ///Sets this binned fp equal to the arithmetic value @p x
+  ///NOTE: Casts @p x to the type of the binned fp
   template <typename U, typename std::enable_if<std::is_arithmetic<U>::value>::type* = nullptr>
   ReproducibleFloatingAccumulator& operator=(const U x){
     zero();
@@ -561,11 +495,14 @@ class ReproducibleFloatingAccumulator {
     return *this;
   }
 
+  ///Sets this binned fp equal to another binned fp
   ReproducibleFloatingAccumulator& operator=(const ReproducibleFloatingAccumulator<ftype, FOLD> &o){
     data = o.data;
     return *this;
   }
 
+  ///Returns the negative of this binned fp
+  ///NOTE: Makes a copy and performs arithmetic; slow.
   ReproducibleFloatingAccumulator operator-() {
     constexpr int incpriX = 1;
     constexpr int inccarX = 1;
@@ -580,6 +517,7 @@ class ReproducibleFloatingAccumulator {
     return temp;
   }
 
+  ///Convert this binned fp into its native floating-point representation
   ftype conv() const {
     if(std::is_same<ftype, float>::value){
       return binned_conv_single(1, 1);
@@ -588,28 +526,32 @@ class ReproducibleFloatingAccumulator {
     }
   }
 
-  /**
-   * @brief Get binned single precision summation error bound
-   *
-   * This is a bound on the absolute error of a summation using binned types
-   *
-   * @param N the number of single precision floating point summands
-   * @param X the summand of maximum absolute value
-   * @param S the value of the sum computed using binned types
-   * @return error bound
-   */
-  static constexpr ftype error_bound(const uint64_t N, const ftype X, const ftype S) {
-    const double Xval = std::abs(X);
-    const double Sval = std::abs(S);
-    return static_cast<ftype>(std::max(Xval, ldexp(0.5, MIN_EXP - 1)) * ldexp(0.5, (1 - FOLD) * BIN_WIDTH + 1) * N + ((7.0 * EPSILON) / (1.0 - 6.0 * std::sqrt(static_cast<double>(EPSILON)) - 7.0 * EPSILON)) * Sval);
+  ///@brief Get binned fp summation error bound
+  ///
+  ///This is a bound on the absolute error of a summation using binned types
+  ///
+  ///@param N           The number of single precision floating point summands
+  ///@param max_abs_val The summand of maximum absolute value
+  ///@param binned_sum  The value of the sum computed using binned types
+  ///@return            The absolute error bound
+  static constexpr ftype error_bound(
+    const uint64_t N, const ftype max_abs_val, const ftype binned_sum
+  ) {
+    const double X = std::abs(max_abs_val);
+    const double S = std::abs(binned_sum);
+    return static_cast<ftype>(std::max(X, ldexp(0.5, MIN_EXP - 1)) * ldexp(0.5, (1 - FOLD) * BIN_WIDTH + 1) * N + ((7.0 * EPSILON) / (1.0 - 6.0 * std::sqrt(static_cast<double>(EPSILON)) - 7.0 * EPSILON)) * S);
   }
 
-  //This routine was provided as a means of allowing the you to optimize your code.
-  //After you have called #binned_smsupdate() on Y with the maximum absolute value
-  //of all future elements you wish to deposit in Y, you can call #binned_smsdeposit()
-  //to deposit a maximum of #binned_SBENDURANCE elements into Y before renormalizing
-  //Y with #binned_smrenorm(). After any number of successive calls of #binned_smsdeposit()
-  //on Y, you must renormalize Y with #binned_smrenorm() before using any other function on Y.
+  ///Add @p x to the binned fp
+  void add(const ftype x){
+    binned_dmdadd(x, 1, 1);
+  }
+
+  ///Add arithmetics in the range [first, last) to the binned fp
+  ///
+  ///@param first       Start of range
+  ///@param last        End of range
+  ///@param max_abs_val Maximum absolute value of any member of the range
   template <typename InputIt>
   void add(InputIt first, InputIt last, const ftype max_abs_val) {
     binned_dmdupdate(std::abs(max_abs_val), 1, 1);
@@ -623,6 +565,13 @@ class ReproducibleFloatingAccumulator {
     }
   }
 
+  ///Add arithmetics in the range [first, last) to the binned fp
+  ///
+  ///NOTE: A maximum absolute value is calculated, so two passes are made over
+  ///      the data
+  ///
+  ///@param first       Start of range
+  ///@param last        End of range
   template <typename InputIt>
   void add(InputIt first, InputIt last) {
     const auto max_abs_val = *std::max_element(first, last, [](const auto &a, const auto &b){
@@ -631,6 +580,11 @@ class ReproducibleFloatingAccumulator {
     add(first, last, static_cast<ftype>(max_abs_val));
   }
 
+  ///Add @p N elements starting at @p input to the binned fp: [input, input+N)
+  ///
+  ///@param input       Start of the range
+  ///@param N           Number of elements to add
+  ///@param max_abs_val Maximum absolute value of any member of the range
   template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
   void add(const T *input, const size_t N, const ftype max_abs_val) {
     if(N==0){
@@ -639,6 +593,13 @@ class ReproducibleFloatingAccumulator {
     add(input, input + N, max_abs_val);
   }
 
+  ///Add @p N elements starting at @p input to the binned fp: [input, input+N)
+  ///
+  ///NOTE: A maximum absolute value is calculated, so two passes are made over
+  ///      the data
+  ///
+  ///@param input       Start of the range
+  ///@param N           Number of elements to add
   template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
   void add(const T *input, const size_t N) {
     if(N==0){
@@ -650,7 +611,37 @@ class ReproducibleFloatingAccumulator {
     }
     add(input, N, max_abs_val);
   }
+
+  //////////////////////////////////////
+  //MANUAL OPERATIONS; USE WISELY
+  //////////////////////////////////////
+
+  ///Rebins for repeated accumulation of scalars with magnitude <= @p mav
+  ///
+  ///Once rebinned, `ENDURANCE` values <= @p mav can be added to the accumulator
+  ///with `unsafe_add` after which `renorm()` must be called. See the source of
+  ///`add()` for an example
+  template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+  void set_max_abs_val(const T mav){
+    binned_dmdupdate(std::abs(mav), 1, 1);
+  }
+
+  ///Add @p x to the binned fp
+  ///
+  ///This is intended to be used after a call to `set_max_abs_val()`
+  void unsafe_add(const ftype x){
+    binned_dmddeposit(x, 1);
+  }
+
+  ///Renormalizes the binned fp
+  ///
+  ///This is intended to be used after a call to `set_max_abs_val()` and one or
+  ///more calls to `unsafe_add()`
+  void renorm() {
+    binned_dmrenorm(1, 1);
+  }
 };
+
 
 
 //Kahan's compensated summation algorithm for accurately calculating sums of
@@ -697,6 +688,28 @@ struct Timer {
     total += time_span.count();
   }
 };
+
+
+
+// Used to make showing bitwise representations somewhat more intuitive
+template<class T>
+struct binrep {
+  const T val;
+  binrep(const T val0) : val(val0) {}
+};
+
+// Display the bitwise representation
+template<class T>
+std::ostream& operator<<(std::ostream& out, const binrep<T> a){
+  const char* beg = reinterpret_cast<const char*>(&a.val);
+  const char *const end = beg + sizeof(a.val);
+  while(beg != end){
+    out << std::bitset<CHAR_BIT>(*beg++);
+    if(beg < end)
+      out << ' ';
+  }
+  return out;
+}
 
 
 
@@ -876,3 +889,14 @@ int main(){
 
   return 0;
 }
+
+
+
+
+//TODO
+  //This routine was provided as a means of allowing the you to optimize your code.
+  //After you have called #binned_smsupdate() on Y with the maximum absolute value
+  //of all future elements you wish to deposit in Y, you can call #binned_smsdeposit()
+  //to deposit a maximum of #binned_SBENDURANCE elements into Y before renormalizing
+  //Y with #binned_smrenorm(). After any number of successive calls of #binned_smsdeposit()
+  //on Y, you must renormalize Y with #binned_smrenorm() before using any other function on Y.
