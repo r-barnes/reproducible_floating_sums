@@ -1,3 +1,4 @@
+//g++ -O3 -g --std=c++17 repro_blas_extract_class.cpp -Wall
 #include <algorithm>
 #include <array>
 #include <bitset>
@@ -7,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <math.h>
 #include <random>
@@ -41,8 +43,13 @@ std::ostream& operator<<(std::ostream& out, const binrep<T> a){
 
 
 
-template<class ftype, int FOLD>
-struct ReproducibleFloatingAccumulator {
+template<
+  class ftype,
+  int FOLD,
+  typename std::enable_if<std::is_floating_point<ftype>::value>::type* = nullptr
+>
+class ReproducibleFloatingAccumulator {
+ private:
   std::array<ftype, 2*FOLD> data = {0};
 
   static constexpr auto BIN_WIDTH = std::is_same<ftype, double>::value ? 40 : 13;
@@ -54,6 +61,8 @@ struct ReproducibleFloatingAccumulator {
   static constexpr auto COMPRESSION = 1.0 / (1 << (MANT_DIG - BIN_WIDTH + 1));
   static constexpr auto EXPANSION = 1.0 * (1 << (MANT_DIG - BIN_WIDTH + 1));
   static constexpr auto EXP_BIAS = MAX_EXP - 2;
+  static constexpr auto EPSILON = std::numeric_limits<ftype>::epsilon();
+  static constexpr auto ENDURANCE = 1 << (MANT_DIG - BIN_WIDTH - 2);
 
   static constexpr std::array<ftype, MAXINDEX + MAXFOLD> initializes_bins(){ //checked
     std::array<ftype, MAXINDEX + MAXFOLD> bins{0};
@@ -74,28 +83,28 @@ struct ReproducibleFloatingAccumulator {
     return bins;
   }
 
-  static constexpr std::array<ftype, MAXINDEX + MAXFOLD> bins = initializes_bins();
+  static constexpr auto bins = initializes_bins();
 
-  static constexpr const ftype* binned_bins(const int x) {
+  static inline constexpr const ftype* binned_bins(const int x) {
     return &bins[x];
   }
 
-  static uint32_t& get_bits(float &x)       { return *reinterpret_cast<      uint32_t*>(&x);}
-  static uint64_t& get_bits(double &x)      { return *reinterpret_cast<      uint64_t*>(&x);}
-  static uint32_t  get_bits(const float &x) { return *reinterpret_cast<const uint32_t*>(&x);}
-  static uint64_t  get_bits(const double &x){ return *reinterpret_cast<const uint64_t*>(&x);}
+  static inline uint32_t& get_bits(float &x)       { return *reinterpret_cast<      uint32_t*>(&x);}
+  static inline uint64_t& get_bits(double &x)      { return *reinterpret_cast<      uint64_t*>(&x);}
+  static inline uint32_t  get_bits(const float &x) { return *reinterpret_cast<const uint32_t*>(&x);}
+  static inline uint64_t  get_bits(const double &x){ return *reinterpret_cast<const uint64_t*>(&x);}
 
-  static constexpr int ISNANINF(const ftype x) { //checked
+  static inline constexpr int ISNANINF(const ftype x) { //checked
     const auto bits = get_bits(x);
     return (bits & ((2ull * MAX_EXP - 1) << (MANT_DIG - 1))) == ((2ull * MAX_EXP - 1) << (MANT_DIG - 1));
   }
 
-  static constexpr int EXP(const ftype x) { //checked
+  static inline constexpr int EXP(const ftype x) { //checked
     const auto bits = get_bits(x);
     return (bits >> (MANT_DIG - 1)) & (2 * MAX_EXP - 1);
   }
 
-  static constexpr int binned_dindex(const ftype x){ //checked
+  static inline constexpr int binned_dindex(const ftype x){ //checked
     int exp = EXP(x);
     if(exp == 0){
       if(x == 0.0){
@@ -108,17 +117,16 @@ struct ReproducibleFloatingAccumulator {
     return ((MAX_EXP + EXP_BIAS) - exp)/BIN_WIDTH;
   }
 
-  void         zero()       { data = {0};         }
-  ftype*       pvec()       { return &data[0];    }
-  ftype*       cvec()       { return &data[FOLD]; }
-  const ftype* pvec() const { return &data[0];    }
-  const ftype* cvec() const { return &data[FOLD]; }
+  inline ftype*       pvec()       { return &data[0];    }
+  inline ftype*       cvec()       { return &data[FOLD]; }
+  inline const ftype* pvec() const { return &data[0];    }
+  inline const ftype* cvec() const { return &data[FOLD]; }
 
-  int binned_index() const { //checked
+  inline int binned_index() const { //checked
     return ((MAX_EXP + MANT_DIG - BIN_WIDTH + 1 + EXP_BIAS) - EXP(pvec()[0]))/BIN_WIDTH;
   }
 
-  bool binned_index0() const { //checked
+  inline bool binned_index0() const { //checked
     return EXP(pvec()[0]) == MAX_EXP + EXP_BIAS;
   }
 
@@ -306,8 +314,6 @@ struct ReproducibleFloatingAccumulator {
     binned_dmrenorm(incpriY, inccarY);
   }
 
-
-
   /**
    * @internal
    * @brief Convert manually specified binned double precision to double precision (X -> Y)
@@ -435,7 +441,146 @@ struct ReproducibleFloatingAccumulator {
     return (float)Y;
   }
 
-  ftype binned_ddbconv() const {
+  /**
+   * @internal
+   * @brief  Add manually specified binned double precision (Y += X)
+   *
+   * Performs the operation Y += X
+   *
+   * @param fold the fold of the binned types
+   * @param priX X's primary vector
+   * @param incpriX stride within X's primary vector (use every incpriX'th element)
+   * @param carX X's carry vector
+   * @param inccarX stride within X's carry vector (use every inccarX'th element)
+   * @param priY Y's primary vector
+   * @param incpriY stride within Y's primary vector (use every incpriY'th element)
+   * @param carY Y's carry vector
+   * @param inccarY stride within Y's carry vector (use every inccarY'th element)
+   *
+   * @author Hong Diep Nguyen
+   * @author Peter Ahrens
+   * @date   27 Apr 2015
+   */
+  void binned_dmdmadd(const ReproducibleFloatingAccumulator &other, const int incpriX, const int inccarX, const int incpriY, const int inccarY) {
+    auto *const priX = pvec();
+    auto *const carX = cvec();
+    auto *const priY = other.pvec();
+    auto *const carY = other.cvec();
+
+    if (priX[0] == 0.0)
+      return;
+
+    if (priY[0] == 0.0) {
+      for (int i = 0; i < FOLD; i++) {
+        priY[i*incpriY] = priX[i*incpriX];
+        carY[i*inccarY] = carX[i*inccarX];
+      }
+      return;
+    }
+
+    if (ISNANINF(priX[0]) || ISNANINF(priY[0])){
+      priY[0] += priX[0];
+      return;
+    }
+
+    const auto X_index = binned_index(priX);
+    const auto Y_index = binned_index(priY);
+    const auto shift = Y_index - X_index;
+    if(shift > 0){
+      const auto *const bins = binned_bins(Y_index);
+      //shift Y upwards and add X to Y
+      for (int i = FOLD - 1; i >= shift; i--) {
+        priY[i*incpriY] = priX[i*incpriX] + (priY[(i - shift)*incpriY] - bins[i - shift]);
+        carY[i*inccarY] = carX[i*inccarX] + carY[(i - shift)*inccarY];
+      }
+      for (int i = 0; i < shift && i < FOLD; i++) {
+        priY[i*incpriY] = priX[i*incpriX];
+        carY[i*inccarY] = carX[i*inccarX];
+      }
+    }else{
+      const auto *const bins = binned_bins(X_index);
+      //shift X upwards and add X to Y
+      for (int i = 0 - shift; i < FOLD; i++) {
+        priY[i*incpriY] += priX[(i + shift)*incpriX] - bins[i + shift];
+        carY[i*inccarY] += carX[(i + shift)*inccarX];
+      }
+    }
+
+    binned_dmrenorm(incpriY, inccarY);
+  }
+
+  void binned_dbdbadd(const ReproducibleFloatingAccumulator &other){
+    binned_dmdmadd(other, 1, 1, 1, 1);
+  }
+
+
+ public:
+  void zero() {
+    data = {0};
+  }
+
+  void binned_dbdadd(const ftype X){
+    binned_dmdadd(X, 1, 1);
+  }
+
+  template <typename U, typename std::enable_if<std::is_arithmetic<U>::value>::type* = nullptr>
+  ReproducibleFloatingAccumulator& operator+=(const U x){
+    binned_dmdadd(static_cast<ftype>(x), 1, 1);
+    return *this;
+  }
+
+  template <typename U, typename std::enable_if<std::is_arithmetic<U>::value>::type* = nullptr>
+  ReproducibleFloatingAccumulator& operator-=(const U x){
+    binned_dmdadd(-static_cast<ftype>(x), 1, 1);
+    return *this;
+  }
+
+  ReproducibleFloatingAccumulator& operator+=(const ReproducibleFloatingAccumulator &other){
+    binned_dbdbadd(other);
+    return *this;
+  }
+
+  ReproducibleFloatingAccumulator& operator-=(const ReproducibleFloatingAccumulator &other){
+    throw std::runtime_error("Not implemented!");
+    // binned_dbdbadd(other);
+    // return *this;
+  }
+
+  bool operator==(const ReproducibleFloatingAccumulator &other) const {
+    return data==other.data;
+  }
+
+  bool operator!=(const ReproducibleFloatingAccumulator &other) const {
+    return !operator==(other);
+  }
+
+  template <typename U, typename std::enable_if<std::is_arithmetic<U>::value>::type* = nullptr>
+  ReproducibleFloatingAccumulator& operator=(const U x){
+    zero();
+    binned_dmdadd(static_cast<ftype>(x), 1, 1);
+    return *this;
+  }
+
+  ReproducibleFloatingAccumulator& operator=(const ReproducibleFloatingAccumulator<ftype, FOLD> &o){
+    data = o.data;
+    return *this;
+  }
+
+  ReproducibleFloatingAccumulator operator-() {
+    constexpr int incpriX = 1;
+    constexpr int inccarX = 1;
+    ReproducibleFloatingAccumulator temp = *this;
+    if(pvec()[0] != 0.0){
+      const auto *const bins = binned_bins(binned_index());
+      for (int i = 0; i < FOLD; i++) {
+        temp.pvec()[i * incpriX] = bins[i] - (pvec()[i * incpriX] - bins[i]);
+        temp.cvec()[i * inccarX] = -cvec()[i * inccarX];
+      }
+    }
+    return temp;
+  }
+
+  ftype conv() const {
     if(std::is_same<ftype, float>::value){
       return binned_conv_single(1, 1);
     } else {
@@ -443,10 +588,68 @@ struct ReproducibleFloatingAccumulator {
     }
   }
 
-  void binned_dbdadd(const ftype X){
-    binned_dmdadd(X, 1, 1);
+  /**
+   * @brief Get binned single precision summation error bound
+   *
+   * This is a bound on the absolute error of a summation using binned types
+   *
+   * @param N the number of single precision floating point summands
+   * @param X the summand of maximum absolute value
+   * @param S the value of the sum computed using binned types
+   * @return error bound
+   */
+  static constexpr ftype error_bound(const uint64_t N, const ftype X, const ftype S) {
+    const double Xval = std::abs(X);
+    const double Sval = std::abs(S);
+    return static_cast<ftype>(std::max(Xval, ldexp(0.5, MIN_EXP - 1)) * ldexp(0.5, (1 - FOLD) * BIN_WIDTH + 1) * N + ((7.0 * EPSILON) / (1.0 - 6.0 * std::sqrt(static_cast<double>(EPSILON)) - 7.0 * EPSILON)) * Sval);
   }
 
+  //This routine was provided as a means of allowing the you to optimize your code.
+  //After you have called #binned_smsupdate() on Y with the maximum absolute value
+  //of all future elements you wish to deposit in Y, you can call #binned_smsdeposit()
+  //to deposit a maximum of #binned_SBENDURANCE elements into Y before renormalizing
+  //Y with #binned_smrenorm(). After any number of successive calls of #binned_smsdeposit()
+  //on Y, you must renormalize Y with #binned_smrenorm() before using any other function on Y.
+  template <typename InputIt>
+  void add(InputIt first, InputIt last, const ftype max_abs_val) {
+    binned_dmdupdate(std::abs(max_abs_val), 1, 1);
+    size_t count = 0;
+    for(;first!=last;first++,count++){
+      binned_dmddeposit(static_cast<ftype>(*first), 1);
+      if(count==ENDURANCE){
+        binned_dmrenorm(1, 1);
+        count = 0;
+      }
+    }
+  }
+
+  template <typename InputIt>
+  void add(InputIt first, InputIt last) {
+    const auto max_abs_val = *std::max_element(first, last, [](const auto &a, const auto &b){
+      return std::abs(a) < std::abs(b);
+    });
+    add(first, last, static_cast<ftype>(max_abs_val));
+  }
+
+  template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+  void add(const T *input, const size_t N, const ftype max_abs_val) {
+    if(N==0){
+      return;
+    }
+    add(input, input + N, max_abs_val);
+  }
+
+  template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+  void add(const T *input, const size_t N) {
+    if(N==0){
+      return;
+    }
+    T max_abs_val = input[0];
+    for(size_t i=0;i<N;i++){
+      max_abs_val = std::max(max_abs_val, std::abs(input[i]));
+    }
+    add(input, N, max_abs_val);
+  }
 };
 
 
@@ -495,55 +698,31 @@ struct Timer {
   }
 };
 
-/*
-int main(){
-  // const int n = 1'000'000;
-  const int n = 1'000;
-  // const std::vector<double> x = sine_vector(n);
-  const std::vector<double> x = inc_vector(n);
-
-  // Here, we sum x using binned primitives. This is less efficient than the
-  // optimized reproBLAS_sum method, but might be useful if the data isn't
-  // arranged in a vector.
-  Timer bin_time;
-  bin_time.start();
-  ReproducibleFloatingAccumulator<float, 3> bd;
-  bd.zero();
-  for(int i = 0; i < n; i++){
-    bd.binned_dbdadd(x[i]);
-  }
-  auto sum = bd.binned_ddbconv();
-  bin_time.stop();
-
-  Timer kahan_time;
-  kahan_time.start();
-  const auto check_sum = serial_kahan_summation<float>(x);
-  kahan_time.stop();
-
-  std::cout<<"Binned sum "<<sum<<", time = "<<bin_time.total<<std::endl;
-  std::cout<<"Checked sum "<<check_sum<<", time = "<<kahan_time.total<<std::endl;
-  std::cout<<"Ratio (lower is better): "<<(bin_time.total/kahan_time.total)<<std::endl;
-}*/
-
 
 
 template<class FloatType>
-FloatType bitwise_deterministic_summation(const std::vector<FloatType> &vec){
+FloatType bitwise_deterministic_summation_1(const std::vector<FloatType> &vec){
   ReproducibleFloatingAccumulator<FloatType, 3> rfa;
   for(const auto &x: vec){
-    rfa.binned_dbdadd(x);
+    // rfa.binned_dbdadd(x);
+    rfa += x;
   }
-  return rfa.binned_ddbconv();
-
-  // float_binned *isum = binned_sballoc(3);
-  // binned_sbsetzero(3, isum);
-  // for(int i = 0; i < vec.size(); i++){
-  //   binned_sbsadd(3, vec[i], isum);
-  // }
-  // const auto sum = binned_ssbconv(3, isum);
-  // return sum;
+  return rfa.conv();
 }
 
+template<class FloatType>
+FloatType bitwise_deterministic_summation_many(const std::vector<FloatType> &vec){
+  ReproducibleFloatingAccumulator<FloatType, 3> rfa;
+  rfa.add(vec.begin(), vec.end());
+  return rfa.conv();
+}
+
+template<class FloatType>
+FloatType bitwise_deterministic_summation_manyc(const std::vector<FloatType> &vec, const FloatType max_abs_val){
+  ReproducibleFloatingAccumulator<FloatType, 3> rfa;
+  rfa.add(vec.begin(), vec.end(), max_abs_val);
+  return rfa.conv();
+}
 
 
 // Timing tests for the summation algorithms
@@ -553,7 +732,9 @@ FloatType PerformTestsOnData(
   std::vector<FloatType> floats, //Make a copy so we use the same data for each test
   std::mt19937 gen               //Make a copy so we use the same data for each test
 ){
-  Timer time_deterministic;
+  Timer time_deterministic_1;
+  Timer time_deterministic_many;
+  Timer time_deterministic_manyc;
   Timer time_kahan;
   Timer time_simple;
 
@@ -567,20 +748,44 @@ FloatType PerformTestsOnData(
   //Get a reference value
   std::unordered_map<FloatType, uint32_t> simple_sums;
   std::unordered_map<FloatType, uint32_t> kahan_sums;
-  const auto ref_val = bitwise_deterministic_summation<FloatType>(floats);
+  const auto ref_val = bitwise_deterministic_summation_1<FloatType>(floats);
   for(int test=0;test<TESTS;test++){
     std::shuffle(floats.begin(), floats.end(), gen);
 
-    time_deterministic.start();
-    const auto my_val = bitwise_deterministic_summation<FloatType>(floats);
-    time_deterministic.stop();
-    if(ref_val!=my_val){
-      std::cout<<"ERROR: UNEQUAL VALUES ON TEST #"<<test<<"!"<<std::endl;
-      std::cout<<"Reference      = "<<ref_val                   <<std::endl;
-      std::cout<<"Current        = "<<my_val                    <<std::endl;
-      std::cout<<"Reference bits = "<<binrep<FloatType>(ref_val)<<std::endl;
-      std::cout<<"Current   bits = "<<binrep<FloatType>(my_val) <<std::endl;
-      // throw std::runtime_error("Values were not equal!");
+    time_deterministic_1.start();
+    const auto my_val_1 = bitwise_deterministic_summation_1<FloatType>(floats);
+    time_deterministic_1.stop();
+    if(ref_val!=my_val_1){
+      std::cout<<"ERROR: UNEQUAL VALUES ON TEST #"<<test<<" for add-1!"<<std::endl;
+      std::cout<<"Reference      = "<<ref_val                    <<std::endl;
+      std::cout<<"Current        = "<<my_val_1                   <<std::endl;
+      std::cout<<"Reference bits = "<<binrep<FloatType>(ref_val) <<std::endl;
+      std::cout<<"Current   bits = "<<binrep<FloatType>(my_val_1)<<std::endl;
+      throw std::runtime_error("Values were not equal!");
+    }
+
+    time_deterministic_many.start();
+    const auto my_val_many = bitwise_deterministic_summation_many<FloatType>(floats);
+    time_deterministic_many.stop();
+    if(ref_val!=my_val_many){
+      std::cout<<"ERROR: UNEQUAL VALUES ON TEST #"<<test<<" for add-many!"<<std::endl;
+      std::cout<<"Reference      = "<<ref_val                       <<std::endl;
+      std::cout<<"Current        = "<<my_val_many                   <<std::endl;
+      std::cout<<"Reference bits = "<<binrep<FloatType>(ref_val)    <<std::endl;
+      std::cout<<"Current   bits = "<<binrep<FloatType>(my_val_many)<<std::endl;
+      throw std::runtime_error("Values were not equal!");
+    }
+
+    time_deterministic_manyc.start();
+    const auto my_val_manyc = bitwise_deterministic_summation_manyc<FloatType>(floats, 1000);
+    time_deterministic_manyc.stop();
+    if(ref_val!=my_val_manyc){
+      std::cout<<"ERROR: UNEQUAL VALUES ON TEST #"<<test<<" for add-many!"<<std::endl;
+      std::cout<<"Reference      = "<<ref_val                        <<std::endl;
+      std::cout<<"Current        = "<<my_val_manyc                   <<std::endl;
+      std::cout<<"Reference bits = "<<binrep<FloatType>(ref_val)     <<std::endl;
+      std::cout<<"Current   bits = "<<binrep<FloatType>(my_val_manyc)<<std::endl;
+      throw std::runtime_error("Values were not equal!");
     }
 
     time_kahan.start();
@@ -594,11 +799,19 @@ FloatType PerformTestsOnData(
     time_simple.stop();
   }
 
-  std::cout<<"Average deterministic summation time = "<<(time_deterministic.total/TESTS)<<std::endl;
+  std::cout<<"Average deterministic sum 1ata time  = "<<(time_deterministic_1.total/TESTS)<<std::endl;
+  std::cout<<"Average deterministic sum many time  = "<<(time_deterministic_many.total/TESTS)<<std::endl;
+  std::cout<<"Average deterministic sum manyc time = "<<(time_deterministic_manyc.total/TESTS)<<std::endl;
   std::cout<<"Average simple summation time        = "<<(time_simple.total/TESTS)<<std::endl;
   std::cout<<"Average Kahan summation time         = "<<(time_kahan.total/TESTS)<<std::endl;
-  std::cout<<"Ratio Deterministic to Simple        = "<<(time_deterministic.total/time_simple.total)<<std::endl;
-  std::cout<<"Ratio Deterministic to Kahan         = "<<(time_deterministic.total/time_kahan.total)<<std::endl;
+  std::cout<<"Ratio Deterministic 1ata to Simple   = "<<(time_deterministic_1.total/time_simple.total)<<std::endl;
+  std::cout<<"Ratio Deterministic 1ata to Kahan    = "<<(time_deterministic_1.total/time_kahan.total)<<std::endl;
+  std::cout<<"Ratio Deterministic many to Simple   = "<<(time_deterministic_many.total/time_simple.total)<<std::endl;
+  std::cout<<"Ratio Deterministic many to Kahan    = "<<(time_deterministic_many.total/time_kahan.total)<<std::endl;
+  std::cout<<"Ratio Deterministic manyc to Simple  = "<<(time_deterministic_manyc.total/time_simple.total)<<std::endl;
+  std::cout<<"Ratio Deterministic manyc to Kahan   = "<<(time_deterministic_manyc.total/time_kahan.total)<<std::endl;
+
+  std::cout<<"Error bound                          = "<<ReproducibleFloatingAccumulator<FloatType, 3>::error_bound(floats.size(), 1000, ref_val)<<std::endl;
 
   std::cout<<"Reference value                      = "<<std::fixed<<ref_val<<std::endl;
   std::cout<<"Reference bits                       = "<<binrep<FloatType>(ref_val)<<std::endl;
@@ -642,7 +855,24 @@ int main(){
   const int TESTS = 100;
 
   PerformTests<float, float>(N, TESTS);
-  // PerformTests<double, double>(N, TESTS);
+  PerformTests<double, double>(N, TESTS);
+
+  // std::mt19937 gen(123456789);
+  // std::uniform_real_distribution<double> distr(-1000, 1000);
+  // std::vector<double> floats;
+  // for(int i=0;i<N;i++){
+  //   floats.push_back(distr(gen));
+  // }
+
+  // Timer time;
+  // time.start();
+  // ReproducibleFloatingAccumulator<double, 3> rfa;
+  // for(const auto &x: floats){
+  //   rfa += x;
+  // }
+  // time.stop();
+
+  // std::cout<<"Time = "<<time.total<<std::endl;
 
   return 0;
 }
