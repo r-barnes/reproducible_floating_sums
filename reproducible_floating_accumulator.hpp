@@ -1,3 +1,24 @@
+//Reproducible Floating Point Accumulations via Binned Floating Point
+//Adapted to C++ by Richard Barnes from ReproBLAS v2.1.0.
+//ReproBLAS by Peter Ahrens, Hong Diep Nguyen, and James Demmel.
+//
+//The code accomplishes several objectives:
+//
+//1. Reproducible summation, independent of summation order, assuming only a
+//   subset of the IEEE 754 Floating Point Standard
+//
+//2. Has accuracy at least as good as conventional summation, and tunable
+//
+//3. Handles overflow, underflow, and other exceptions reproducibly.
+//
+//4. Makes only one read-only pass over the summands.
+//
+//5. Requires only one parallel reduction.
+//
+//6. Uses minimal memory (6 doubles per accumulator with fold=3).
+//
+//7. Relatively easy to use
+
 #pragma once
 
 #include <algorithm>
@@ -7,9 +28,13 @@
 #include <cstdint>
 #include <limits>
 
+///Class to hold a reproducible summation of the numbers passed to it
+///
+///@param ftype Floating-point data type; either `float` or `double`
+///@param FOLD  The fold; use 3 as a default unless you understand it.
 template<
   class ftype,
-  int FOLD,
+  int FOLD = 3,
   typename std::enable_if<std::is_floating_point<ftype>::value>::type* = nullptr
 >
 class ReproducibleFloatingAccumulator {

@@ -79,9 +79,8 @@ std::ostream& operator<<(std::ostream& out, const binrep<T> a){
 
 template<class FloatType>
 FloatType bitwise_deterministic_summation_1(const std::vector<FloatType> &vec){
-  ReproducibleFloatingAccumulator<FloatType, 3> rfa;
+  ReproducibleFloatingAccumulator<FloatType> rfa;
   for(const auto &x: vec){
-    // rfa.binned_dbdadd(x);
     rfa += x;
   }
   return rfa.conv();
@@ -89,14 +88,14 @@ FloatType bitwise_deterministic_summation_1(const std::vector<FloatType> &vec){
 
 template<class FloatType>
 FloatType bitwise_deterministic_summation_many(const std::vector<FloatType> &vec){
-  ReproducibleFloatingAccumulator<FloatType, 3> rfa;
+  ReproducibleFloatingAccumulator<FloatType> rfa;
   rfa.add(vec.begin(), vec.end());
   return rfa.conv();
 }
 
 template<class FloatType>
 FloatType bitwise_deterministic_summation_manyc(const std::vector<FloatType> &vec, const FloatType max_abs_val){
-  ReproducibleFloatingAccumulator<FloatType, 3> rfa;
+  ReproducibleFloatingAccumulator<FloatType> rfa;
   rfa.add(vec.begin(), vec.end(), max_abs_val);
   return rfa.conv();
 }
@@ -188,7 +187,7 @@ FloatType PerformTestsOnData(
   std::cout<<"Ratio Deterministic manyc to Simple  = "<<(time_deterministic_manyc.total/time_simple.total)<<std::endl;
   std::cout<<"Ratio Deterministic manyc to Kahan   = "<<(time_deterministic_manyc.total/time_kahan.total)<<std::endl;
 
-  std::cout<<"Error bound                          = "<<ReproducibleFloatingAccumulator<FloatType, 3>::error_bound(floats.size(), 1000, ref_val)<<std::endl;
+  std::cout<<"Error bound                          = "<<ReproducibleFloatingAccumulator<FloatType>::error_bound(floats.size(), 1000, ref_val)<<std::endl;
 
   std::cout<<"Reference value                      = "<<std::fixed<<ref_val<<std::endl;
   std::cout<<"Reference bits                       = "<<binrep<FloatType>(ref_val)<<std::endl;
@@ -243,7 +242,7 @@ int main(){
 
   // Timer time;
   // time.start();
-  // ReproducibleFloatingAccumulator<double, 3> rfa;
+  // ReproducibleFloatingAccumulator<double> rfa;
   // for(const auto &x: floats){
   //   rfa += x;
   // }
