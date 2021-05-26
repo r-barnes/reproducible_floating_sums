@@ -4,11 +4,10 @@
 //NOTE: Always comile with `-g`. It doesn't slow down your code, but does make
 //it debuggable and improves ease of profiling
 
+#include "common.hpp"
+
 #include <algorithm>
-#include <bitset>               //Used for showing bitwise representations
 #include <cfenv>                //Used for setting floating-point rounding modes
-#include <chrono>               //Used for timing algorithms
-#include <climits>              //Used for showing bitwise representations
 #include <iostream>
 #include <omp.h>                //OpenMP
 #include <random>
@@ -21,25 +20,6 @@
 constexpr int ROUNDING_MODE = FE_UPWARD;
 constexpr int N = 1'000'000;
 constexpr int TESTS = 100;
-
-// Simple timer class for tracking cumulative run time of the different
-// algorithms
-struct Timer {
-  double total = 0;
-  std::chrono::high_resolution_clock::time_point start_time;
-
-  Timer() = default;
-
-  void start() {
-    start_time = std::chrono::high_resolution_clock::now();
-  }
-
-  void stop() {
-    const auto now = std::chrono::high_resolution_clock::now();
-    const auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_time);
-    total += time_span.count();
-  }
-};
 
 //Simple class to enable directed rounding in floating-point math and to reset
 //the rounding mode afterwards, when it goes out of scope
@@ -69,38 +49,6 @@ struct SetRoundingMode {
   }
 };
 
-// Used to make showing bitwise representations somewhat more intuitive
-template<class T>
-struct binrep {
-  const T val;
-  binrep(const T val0) : val(val0) {}
-};
-
-// Display the bitwise representation
-template<class T>
-std::ostream& operator<<(std::ostream& out, const binrep<T> a){
-  const char* beg = reinterpret_cast<const char*>(&a.val);
-  const char *const end = beg + sizeof(a.val);
-  while(beg != end){
-    out << std::bitset<CHAR_BIT>(*beg++);
-    if(beg < end)
-      out << ' ';
-  }
-  return out;
-}
-
-
-
-//Simple serial summation algorithm with an accumulation type we can specify
-//to more fully explore its behaviour
-template<class FloatType, class SimpleAccumType>
-FloatType serial_simple_summation(const std::vector<FloatType> &vec){
-  SimpleAccumType sum = 0;
-  for(const auto &x: vec){
-    sum += x;
-  }
-  return sum;
-}
 
 //Parallel variant of the simple summation algorithm above
 template<class FloatType, class SimpleAccumType>
@@ -113,22 +61,6 @@ FloatType parallel_simple_summation(const std::vector<FloatType> &vec){
   return sum;
 }
 
-
-
-//Kahan's compensated summation algorithm for accurately calculating sums of
-//many numbers with O(1) error
-template<class FloatType>
-FloatType serial_kahan_summation(const std::vector<FloatType> &vec){
-  FloatType sum = 0.0f;
-  FloatType c = 0.0f;
-  for (const auto &num: vec) {
-    const auto y = num - c;
-    const auto t = sum + y;
-    c = (t - sum) - y;
-    sum = t;
-  }
-  return sum;
-}
 
 //Parallel version of Kahan's compensated summation algorithm (could be improved
 //by better accounting for the compsenation during the reduction phase)
@@ -336,7 +268,7 @@ FloatType simple_summation(const std::vector<FloatType> &vec){
   if(Parallel){
     return parallel_simple_summation<FloatType, SimpleAccumType>(vec);
   } else {
-    return serial_simple_summation<FloatType, SimpleAccumType>(vec);
+    return serial_simple_summation<SimpleAccumType, FloatType>(vec);
   }
 }
 

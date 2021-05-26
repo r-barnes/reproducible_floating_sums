@@ -1,82 +1,12 @@
-//g++ -O3 -g --std=c++17 repro_blas_extract_class.cpp -Wall
+#include "common.hpp"
 #include "reproducible_floating_accumulator.hpp"
 
-#include <bitset>
-#include <chrono>
 #include <iostream>
 #include <random>
 #include <unordered_map>
 #include <vector>
 
-//Kahan's compensated summation algorithm for accurately calculating sums of
-//many numbers with O(1) error
-template<class AccumType, class FloatType>
-FloatType serial_kahan_summation(const std::vector<FloatType> &vec){
-  AccumType sum = 0.0f;
-  AccumType c = 0.0f;
-  for (const auto &num: vec) {
-    const auto y = num - c;
-    const auto t = sum + y;
-    c = (t - sum) - y;
-    sum = t;
-  }
-  return sum;
-}
-
-//Simple serial summation algorithm with an accumulation type we can specify
-//to more fully explore its behaviour
-template<class FloatType, class SimpleAccumType>
-FloatType serial_simple_summation(const std::vector<FloatType> &vec){
-  SimpleAccumType sum = 0;
-  for(const auto &x: vec){
-    sum += x;
-  }
-  return sum;
-}
-
-// Simple timer class for tracking cumulative run time of the different
-// algorithms
-struct Timer {
-  double total = 0;
-  std::chrono::high_resolution_clock::time_point start_time;
-
-  Timer() = default;
-
-  void start() {
-    start_time = std::chrono::high_resolution_clock::now();
-  }
-
-  void stop() {
-    const auto now = std::chrono::high_resolution_clock::now();
-    const auto time_span = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_time);
-    total += time_span.count();
-  }
-};
-
-
-
-// Used to make showing bitwise representations somewhat more intuitive
-template<class T>
-struct binrep {
-  const T val;
-  binrep(const T val0) : val(val0) {}
-};
-
-// Display the bitwise representation
-template<class T>
-std::ostream& operator<<(std::ostream& out, const binrep<T> a){
-  const char* beg = reinterpret_cast<const char*>(&a.val);
-  const char *const end = beg + sizeof(a.val);
-  while(beg != end){
-    out << std::bitset<CHAR_BIT>(*beg++);
-    if(beg < end)
-      out << ' ';
-  }
-  return out;
-}
-
-
-
+///Tests summing many numbers one at a time without a known absolute value caps
 template<class FloatType>
 FloatType bitwise_deterministic_summation_1(const std::vector<FloatType> &vec){
   ReproducibleFloatingAccumulator<FloatType> rfa;
@@ -86,6 +16,7 @@ FloatType bitwise_deterministic_summation_1(const std::vector<FloatType> &vec){
   return rfa.conv();
 }
 
+///Tests summing many numbers without a known absolute value caps
 template<class FloatType>
 FloatType bitwise_deterministic_summation_many(const std::vector<FloatType> &vec){
   ReproducibleFloatingAccumulator<FloatType> rfa;
@@ -93,6 +24,7 @@ FloatType bitwise_deterministic_summation_many(const std::vector<FloatType> &vec
   return rfa.conv();
 }
 
+///Tests summing many numbers with a known absolute value caps
 template<class FloatType>
 FloatType bitwise_deterministic_summation_manyc(const std::vector<FloatType> &vec, const FloatType max_abs_val){
   ReproducibleFloatingAccumulator<FloatType> rfa;
@@ -117,6 +49,10 @@ FloatType PerformTestsOnData(
   //Very precise output
   std::cout.precision(std::numeric_limits<FloatType>::max_digits10);
   std::cout<<std::fixed;
+
+  std::cout<<"'1ata' tests summing many numbers one at a time without a known absolute value caps"<<std::endl;
+  std::cout<<"'many' tests summing many numbers without a known absolute value caps"<<std::endl;
+  std::cout<<"'manyc' tests summing many numbers with a known absolute value caps\n"<<std::endl;
 
   std::cout<<"Floating type                        = "<<typeid(FloatType).name()<<std::endl;
   std::cout<<"Simple summation accumulation type   = "<<typeid(SimpleAccumType).name()<<std::endl;
@@ -170,7 +106,7 @@ FloatType PerformTestsOnData(
     time_kahan.stop();
 
     time_simple.start();
-    const auto simple_sum = serial_simple_summation<FloatType, SimpleAccumType>(floats);
+    const auto simple_sum = serial_simple_summation<SimpleAccumType>(floats);
     simple_sums[simple_sum]++;
     time_simple.stop();
   }
@@ -233,33 +169,5 @@ int main(){
   PerformTests<float, float>(N, TESTS);
   PerformTests<double, double>(N, TESTS);
 
-  // std::mt19937 gen(123456789);
-  // std::uniform_real_distribution<double> distr(-1000, 1000);
-  // std::vector<double> floats;
-  // for(int i=0;i<N;i++){
-  //   floats.push_back(distr(gen));
-  // }
-
-  // Timer time;
-  // time.start();
-  // ReproducibleFloatingAccumulator<double> rfa;
-  // for(const auto &x: floats){
-  //   rfa += x;
-  // }
-  // time.stop();
-
-  // std::cout<<"Time = "<<time.total<<std::endl;
-
   return 0;
 }
-
-
-
-
-//TODO
-  //This routine was provided as a means of allowing the you to optimize your code.
-  //After you have called #binned_smsupdate() on Y with the maximum absolute value
-  //of all future elements you wish to deposit in Y, you can call #binned_smsdeposit()
-  //to deposit a maximum of #binned_SBENDURANCE elements into Y before renormalizing
-  //Y with #binned_smrenorm(). After any number of successive calls of #binned_smsdeposit()
-  //on Y, you must renormalize Y with #binned_smrenorm() before using any other function on Y.
