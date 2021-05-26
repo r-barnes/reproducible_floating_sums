@@ -19,7 +19,7 @@
 #include <vector>
 
 constexpr int ROUNDING_MODE = FE_UPWARD;
-constexpr int N = 100'000;
+constexpr int N = 1'000'000;
 constexpr int TESTS = 100;
 
 // Simple timer class for tracking cumulative run time of the different
