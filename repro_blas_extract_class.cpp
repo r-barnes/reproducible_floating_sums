@@ -1,12 +1,12 @@
 //g++ -O3 -g --std=c++17 repro_blas_extract_class.cpp -Wall
+#include "reproducible_floating_accumulator.hpp"
+
 #include <bitset>
 #include <chrono>
 #include <iostream>
 #include <random>
 #include <unordered_map>
 #include <vector>
-
-#include "reproducible_floating_accumulator.hpp"
 
 //Kahan's compensated summation algorithm for accurately calculating sums of
 //many numbers with O(1) error
