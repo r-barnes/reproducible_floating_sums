@@ -66,11 +66,11 @@ class ReproducibleFloatingAccumulator {
   static constexpr auto ENDURANCE = 1 << (MANT_DIG - BIN_WIDTH - 2);
 
   ///Generates binned floating-point reference bins
-  static constexpr std::array<ftype, MAXINDEX + MAXFOLD> initializes_bins(){ //checked
+  static constexpr std::array<ftype, MAXINDEX + MAXFOLD> initialize_bins(){
     std::array<ftype, MAXINDEX + MAXFOLD> bins{0};
 
     if(std::is_same<ftype, float>::value){
-      bins[0] = ldexpf(0.75, MAX_EXP);
+      bins[0] = std::ldexp(0.75, MAX_EXP);
     } else {
       bins[0] = 2.0 * ldexp(0.75, MAX_EXP - 1);
     }
@@ -86,7 +86,7 @@ class ReproducibleFloatingAccumulator {
   }
 
   ///The binned floating-point reference bins
-  static constexpr auto bins = initializes_bins();
+  static constexpr auto bins = initialize_bins();
 
   ///Return a binned floating-point reference bin
   static inline constexpr const ftype* binned_bins(const int x) {
@@ -285,7 +285,7 @@ class ReproducibleFloatingAccumulator {
   ///
   ///@param incpriY stride within Y's primary vector (use every incpriY'th element)
   ///@param inccarY stride within Y's carry vector (use every inccarY'th element)
-  void binned_dmdadd(const ftype X, const int incpriY, const int inccarY){ //checked
+  void binned_dmdadd(const ftype X, const int incpriY, const int inccarY){
     binned_dmdupdate(X, incpriY, inccarY);
     binned_dmddeposit(X, incpriY);
     binned_dmrenorm(incpriY, inccarY);
