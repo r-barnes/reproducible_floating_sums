@@ -61,6 +61,7 @@ FloatType PerformTestsOnData(
   std::unordered_map<FloatType, uint32_t> simple_sums;
   std::unordered_map<FloatType, uint32_t> kahan_sums;
   const auto ref_val = bitwise_deterministic_summation_1<FloatType>(floats);
+  const auto kahan_ldsum = serial_kahan_summation<long double>(floats);
   for(int test=0;test<TESTS;test++){
     std::shuffle(floats.begin(), floats.end(), gen);
 
@@ -128,6 +129,7 @@ FloatType PerformTestsOnData(
   std::cout<<"Reference value                      = "<<std::fixed<<ref_val<<std::endl;
   std::cout<<"Reference bits                       = "<<binrep<FloatType>(ref_val)<<std::endl;
 
+  std::cout<<"Kahan long double accumulator value  = "<<kahan_ldsum<<std::endl;
   std::cout<<"Distinct Kahan values                = "<<kahan_sums.size()<<std::endl;
   std::cout<<"Distinct Simple values               = "<<simple_sums.size()<<std::endl;
 
@@ -144,30 +146,43 @@ FloatType PerformTestsOnData(
   return ref_val;
 }
 
-
-
 // Use this to make sure the tests are reproducible
 template<class FloatType, class SimpleAccumType>
-void PerformTests(const int N, const int TESTS){
-  std::random_device rd;
-  // std::mt19937 gen(rd());
+void PerformTestsOnUniformRandom(const int N, const int TESTS){
   std::mt19937 gen(123456789);
-  std::uniform_real_distribution<FloatType> distr(-1000, 1000);
-  std::vector<FloatType> floats;
+  std::uniform_real_distribution<double> distr(-1000, 1000);
+  std::vector<double> floats;
   for(int i=0;i<N;i++){
     floats.push_back(distr(gen));
   }
-  PerformTestsOnData<FloatType, SimpleAccumType>(TESTS, floats, gen);
+  std::vector<FloatType> input(floats.begin(), floats.end());
+  std::cout<<"Input Data                           = Uniform Random"<<std::endl;
+  PerformTestsOnData<FloatType, SimpleAccumType>(TESTS, input, gen);
 }
 
-
+// Use this to make sure the tests are reproducible
+template<class FloatType, class SimpleAccumType>
+void PerformTestsOnSineWaveData(const int N, const int TESTS){
+  std::mt19937 gen(123456789);
+  std::vector<FloatType> input;
+  input.reserve(N);
+  // Make a sine wave
+  for(int i = 0; i < N; i++){
+    input.push_back(std::sin(2 * M_PI * (i / static_cast<double>(N) - 0.5)));
+  }
+  std::cout<<"Input Data                           = Sine Wave"<<std::endl;
+  PerformTestsOnData<FloatType, SimpleAccumType>(TESTS, input, gen);
+}
 
 int main(){
   const int N = 1'000'000;
   const int TESTS = 100;
 
-  PerformTests<float, float>(N, TESTS);
-  PerformTests<double, double>(N, TESTS);
+  PerformTestsOnUniformRandom<float, float>(N, TESTS);
+  PerformTestsOnUniformRandom<double, double>(N, TESTS);
+
+  PerformTestsOnSineWaveData<float, float>(N, TESTS);
+  PerformTestsOnSineWaveData<double, double>(N, TESTS);
 
   return 0;
 }
