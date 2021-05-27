@@ -466,6 +466,16 @@ class ReproducibleFloatingAccumulator {
     data = {0};
   }
 
+  ///Return the fold of the binned fp
+  int fold() const {
+    return FOLD;
+  }
+
+  ///Returns the number of reference bins. Used for judging memory usage.
+  static constexpr size_t number_of_reference_bins() {
+    return bins.size();
+  }
+
   ///Accumulate an arithmetic @p x into the binned fp.
   ///NOTE: Casts @p x to the type of the binned fp
   template <typename U, typename std::enable_if<std::is_arithmetic<U>::value>::type* = nullptr>
